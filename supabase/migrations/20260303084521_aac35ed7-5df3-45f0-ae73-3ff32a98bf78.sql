@@ -1,0 +1,7 @@
+
+-- Allow users to insert their own role (needed for become-seller flow)
+CREATE POLICY "Users can insert their own role"
+ON public.user_roles
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
