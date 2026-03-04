@@ -8,7 +8,7 @@ import EditProductDialog from "@/components/EditProductDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Package, TrendingUp, ShoppingCart, Bell, Loader2, CheckCircle, Shield, AlertTriangle, XCircle, Pencil, Trash2 } from "lucide-react";
+import { Package, TrendingUp, ShoppingCart, Bell, Loader2, CheckCircle, Shield, AlertTriangle, XCircle, Pencil, Trash2, Truck } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
@@ -20,6 +20,7 @@ interface OrderWithDetails {
   id: string;
   status: string;
   payment_status: string;
+  delivery_status: string;
   total: number;
   created_at: string;
   buyer_id: string;
@@ -91,7 +92,7 @@ const SellerDashboard = () => {
       const orderIds = [...new Set(orderItems.map((oi) => oi.order_id))];
       const { data: ordersData } = await supabase
         .from("orders")
-        .select("id, status, payment_status, total, created_at, buyer_id")
+        .select("id, status, payment_status, delivery_status, total, created_at, buyer_id")
         .in("id", orderIds)
         .order("created_at", { ascending: false });
 
@@ -106,6 +107,7 @@ const SellerDashboard = () => {
 
       const enriched: OrderWithDetails[] = (ordersData || []).map((order) => ({
         ...order,
+        delivery_status: order.delivery_status || order.status || "pending",
         buyer_name: profileMap.get(order.buyer_id) || "Unknown Buyer",
         items: orderItems
           .filter((oi) => oi.order_id === order.id)
@@ -173,17 +175,102 @@ const SellerDashboard = () => {
     fetchData();
   }, [user]);
 
-  const markDelivered = async (orderId: string) => {
+  const updateOrderStatus = async (orderId: string, newStatus: string, label: string) => {
     setUpdatingOrder(orderId);
+    const updateData: Record<string, string> = { delivery_status: newStatus };
+
     const { error } = await supabase
       .from("orders")
-      .update({ status: "delivered" })
+      .update(updateData)
       .eq("id", orderId);
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Order delivered!", description: "The buyer has been notified." });
+      toast({ title: `Order ${label}!`, description: "The buyer has been notified." });
+
+      // Notify the buyer
+      const order = orders.find((o) => o.id === orderId);
+      if (order) {
+        const messages: Record<string, string> = {
+          confirmed: "Your order has been accepted by the seller! 🎉",
+          packed: "Your order has been packed and is ready for pickup! 📦",
+        };
+        if (messages[newStatus]) {
+          await supabase.from("notifications").insert({
+            user_id: order.buyer_id,
+            title: "Order Update",
+            message: messages[newStatus],
+            type: "order",
+          });
+        }
+
+        // When packed, assign order to a delivery batch
+        if (newStatus === "packed") {
+          try {
+            // Get the buyer's delivery address for this order
+            const { data: orderData } = await supabase
+              .from("orders")
+              .select("address_id")
+              .eq("id", orderId)
+              .single();
+
+            let village = "Unknown";
+            let district: string | null = null;
+
+            if (orderData?.address_id) {
+              const { data: addr } = await supabase
+                .from("addresses")
+                .select("village, district, name")
+                .eq("id", orderData.address_id)
+                .single();
+              if (addr) {
+                village = addr.village || addr.district || addr.name || "Unknown";
+                district = addr.district || null;
+              }
+            }
+
+            // Find or create a batch for this village today
+            const today = new Date().toISOString().split("T")[0];
+            const { data: existingBatches } = await supabase
+              .from("delivery_batches")
+              .select("id")
+              .eq("village", village)
+              .eq("status", "created")
+              .gte("created_at", `${today}T00:00:00`)
+              .lte("created_at", `${today}T23:59:59`)
+              .limit(1);
+
+            let batchId: string;
+
+            if (existingBatches && existingBatches.length > 0) {
+              batchId = existingBatches[0].id;
+            } else {
+              const { data: newBatch, error: batchErr } = await supabase
+                .from("delivery_batches")
+                .insert({ village, district, status: "created" })
+                .select()
+                .single();
+
+              if (batchErr || !newBatch) {
+                console.error("Batch creation error:", batchErr);
+              } else {
+                batchId = newBatch.id;
+              }
+            }
+
+            if (batchId!) {
+              await supabase
+                .from("orders")
+                .update({ batch_id: batchId })
+                .eq("id", orderId);
+            }
+          } catch (batchErr) {
+            console.error("Batch assignment error:", batchErr);
+          }
+        }
+      }
+
       fetchData();
     }
     setUpdatingOrder(null);
@@ -193,7 +280,7 @@ const SellerDashboard = () => {
     .filter((o) => o.payment_status === "paid")
     .reduce((sum, o) => sum + o.total, 0);
 
-  const activeOrders = orders.filter((o) => o.status === "pending" || o.status === "accepted" || o.status === "shipped").length;
+  const activeOrders = orders.filter((o) => !['delivered', 'cancelled'].includes(o.delivery_status)).length;
 
   const stats = [
     { label: "Total Products", value: String(products.length), icon: Package, color: "text-primary" },
@@ -445,19 +532,40 @@ const SellerDashboard = () => {
                           </span>
                         ))}
                       </div>
-                      {order.payment_status === "paid" && order.status !== "delivered" && (
-                        <Button
-                          size="sm"
-                          onClick={() => markDelivered(order.id)}
-                          disabled={updatingOrder === order.id}
-                        >
-                          {updatingOrder === order.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                          ) : (
-                            <CheckCircle className="w-4 h-4 mr-1" />
+                      {order.payment_status === "paid" && order.delivery_status !== "delivered" && order.delivery_status !== "cancelled" && (
+                        <div className="flex gap-2 flex-wrap">
+                          {order.delivery_status === "pending" && (
+                            <Button
+                              size="sm"
+                              onClick={() => updateOrderStatus(order.id, "confirmed", "confirmed")}
+                              disabled={updatingOrder === order.id}
+                            >
+                              {updatingOrder === order.id ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle className="w-4 h-4 mr-1" />}
+                              Accept Order
+                            </Button>
                           )}
-                          Mark as Delivered
-                        </Button>
+                          {order.delivery_status === "confirmed" && (
+                            <Button
+                              size="sm"
+                              onClick={() => updateOrderStatus(order.id, "packed", "packed")}
+                              disabled={updatingOrder === order.id}
+                            >
+                              {updatingOrder === order.id ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Package className="w-4 h-4 mr-1" />}
+                              Mark Packed
+                            </Button>
+                          )}
+                          {order.delivery_status === "packed" && (
+                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-xs">
+                              ✓ Ready for Pickup
+                            </Badge>
+                          )}
+                          {(order.delivery_status === "picked_up" || order.delivery_status === "out_for_delivery") && (
+                            <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-xs">
+                              <Truck className="w-3 h-3 mr-1" />
+                              {order.delivery_status === "picked_up" ? "Picked Up" : "Out for Delivery"}
+                            </Badge>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}

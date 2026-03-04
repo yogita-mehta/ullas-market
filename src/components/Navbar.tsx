@@ -1,9 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Menu, X, ShoppingBag, LogOut, User, Store, Shield } from "lucide-react";
+import { Menu, X, ShoppingBag, LogOut, User, Store, Shield, ShoppingCart, Truck } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCart } from "@/contexts/CartContext";
 
 const navLinks = [
   { label: "Home", to: "/" },
@@ -14,9 +16,11 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const { user, signOut, role } = useAuth();
+  const { cartCount } = useCart();
 
   const isSeller = role === "seller" || role === "admin";
   const isAdmin = role === "admin";
+  const isDeliveryPartner = role === "delivery_partner";
   const dashboardLink = isSeller ? "/seller" : "/buyer";
 
   return (
@@ -43,6 +47,17 @@ const Navbar = () => {
         <div className="hidden md:flex items-center gap-3">
           {user ? (
             <>
+              {/* Cart Icon */}
+              <Button variant="ghost" size="sm" asChild className="relative">
+                <Link to="/cart">
+                  <ShoppingCart className="w-4 h-4" />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-primary text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                      {cartCount > 9 ? "9+" : cartCount}
+                    </span>
+                  )}
+                </Link>
+              </Button>
               <Button variant="ghost" size="sm" asChild>
                 <Link to={dashboardLink}><User className="w-4 h-4 mr-1" /> Dashboard</Link>
               </Button>
@@ -51,9 +66,14 @@ const Navbar = () => {
                   <Link to="/admin"><Shield className="w-4 h-4 mr-1" /> Admin</Link>
                 </Button>
               )}
-              {!isSeller && !isAdmin && (
+              {!isSeller && !isAdmin && !isDeliveryPartner && (
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/become-seller"><Store className="w-4 h-4 mr-1" /> Become Seller</Link>
+                </Button>
+              )}
+              {isDeliveryPartner && (
+                <Button variant="outline" size="sm" asChild className="border-cyan-300 text-cyan-700">
+                  <Link to="/delivery/dashboard"><Truck className="w-4 h-4 mr-1" /> Deliveries</Link>
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={signOut}>
@@ -100,6 +120,14 @@ const Navbar = () => {
               <div className="flex flex-col gap-2 pt-2">
                 {user ? (
                   <>
+                    <Button variant="outline" size="sm" asChild className="relative justify-start">
+                      <Link to="/cart" onClick={() => setMobileOpen(false)}>
+                        <ShoppingCart className="w-4 h-4 mr-2" /> Cart
+                        {cartCount > 0 && (
+                          <Badge className="ml-2 bg-primary text-white text-xs h-5 px-1.5">{cartCount}</Badge>
+                        )}
+                      </Link>
+                    </Button>
                     <Button variant="outline" size="sm" asChild>
                       <Link to={dashboardLink} onClick={() => setMobileOpen(false)}>Dashboard</Link>
                     </Button>
@@ -110,9 +138,16 @@ const Navbar = () => {
                         </Link>
                       </Button>
                     )}
-                    {!isSeller && !isAdmin && (
+                    {!isSeller && !isAdmin && !isDeliveryPartner && (
                       <Button variant="outline" size="sm" asChild>
                         <Link to="/become-seller" onClick={() => setMobileOpen(false)}>Become Seller</Link>
+                      </Button>
+                    )}
+                    {isDeliveryPartner && (
+                      <Button variant="outline" size="sm" asChild className="border-cyan-300 text-cyan-700">
+                        <Link to="/delivery/dashboard" onClick={() => setMobileOpen(false)}>
+                          <Truck className="w-4 h-4 mr-1" /> Deliveries
+                        </Link>
                       </Button>
                     )}
                     <Button variant="warm" size="sm" onClick={() => { signOut(); setMobileOpen(false); }}>
