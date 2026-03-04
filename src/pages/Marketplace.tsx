@@ -27,12 +27,57 @@ const Marketplace = () => {
   const [buyingId, setBuyingId] = useState<string | null>(null);
   const [sellerNames, setSellerNames] = useState<Record<string, string>>({});
   const [verifiedSellers, setVerifiedSellers] = useState<Set<string>>(new Set());
+  const [usingSmartFeed, setUsingSmartFeed] = useState(false);
 
   useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
 
-      // Fetch verified seller IDs first
+      // Try smart feed first if user is logged in
+      if (user) {
+        try {
+          const { data, error } = await supabase.functions.invoke("smart-feed", {
+            body: {
+              user_id: user.id,
+              category: activeCategory !== "All" ? activeCategory : undefined,
+              limit: 50,
+            },
+          });
+
+          if (!error && data?.products && data.products.length > 0) {
+            setProducts(data.products as Product[]);
+            setUsingSmartFeed(true);
+
+            // Fetch verified sellers for badges
+            const { data: verifiedProfiles } = await supabase
+              .from("seller_profiles")
+              .select("user_id")
+              .eq("fssai_verified", true);
+            setVerifiedSellers(new Set((verifiedProfiles || []).map((p) => p.user_id)));
+
+            // Fetch seller names
+            const sellerIds = [...new Set(data.products.map((p: Product) => p.seller_id))];
+            if (sellerIds.length > 0) {
+              const { data: profiles } = await supabase
+                .from("profiles")
+                .select("user_id, full_name")
+                .in("user_id", sellerIds);
+              const map: Record<string, string> = {};
+              (profiles || []).forEach((p) => { map[p.user_id] = p.full_name || "Local Seller"; });
+              setSellerNames(map);
+            }
+
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // Smart feed failed, fall back to default
+        }
+      }
+
+      // Fallback: default product listing
+      setUsingSmartFeed(false);
+
       const { data: verifiedProfiles } = await supabase
         .from("seller_profiles")
         .select("user_id")
@@ -48,11 +93,9 @@ const Marketplace = () => {
         .order("created_at", { ascending: false });
 
       if (data) {
-        // Filter to only show products from verified sellers
         const verifiedProducts = data.filter((p) => verifiedIds.has(p.seller_id));
         setProducts(verifiedProducts);
 
-        // Fetch seller profile names
         const sellerIds = [...new Set(verifiedProducts.map((p) => p.seller_id))];
         if (sellerIds.length > 0) {
           const { data: profiles } = await supabase
@@ -67,14 +110,15 @@ const Marketplace = () => {
       setLoading(false);
     };
     fetchProducts();
-  }, []);
+  }, [user, activeCategory]);
 
   const filtered = products.filter((p) => {
     const matchCategory = activeCategory === "All" || p.category === activeCategory;
     const matchSearch =
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (p.local_name?.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchCategory && matchSearch;
+    // If using smart feed, category is already filtered server-side
+    return (usingSmartFeed || matchCategory) && matchSearch;
   });
 
   const handleBuyNow = async (product: Product) => {
@@ -91,7 +135,6 @@ const Marketplace = () => {
 
     setBuyingId(product.id);
     try {
-      // Create order
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
@@ -105,7 +148,6 @@ const Marketplace = () => {
 
       if (orderError) throw orderError;
 
-      // Create order item
       const { error: itemError } = await supabase
         .from("order_items")
         .insert({
@@ -139,7 +181,9 @@ const Marketplace = () => {
               Marketplace
             </h1>
             <p className="text-muted-foreground font-body">
-              Authentic homemade products from FSSAI verified sellers
+              {usingSmartFeed
+                ? "Personalized picks based on your preferences ✨"
+                : "Authentic homemade products from FSSAI verified sellers"}
             </p>
           </motion.div>
 
