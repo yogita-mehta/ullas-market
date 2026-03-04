@@ -6,7 +6,7 @@ import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, Heart, Star, Loader2, CreditCard } from "lucide-react";
+import { ShoppingCart, Heart, Star, Loader2, CreditCard, Shield } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
@@ -14,13 +14,14 @@ import { Link } from "react-router-dom";
 interface OrderWithItems {
   id: string;
   status: string;
+  payment_status: string;
   total: number;
   created_at: string;
   items: { product_name: string; quantity: number; price: number; seller_name: string }[];
 }
 
 const BuyerDashboard = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [payingId, setPayingId] = useState<string | null>(null);
@@ -31,7 +32,7 @@ const BuyerDashboard = () => {
 
     const { data: ordersData } = await supabase
       .from("orders")
-      .select("id, status, total, created_at")
+      .select("id, status, payment_status, total, created_at")
       .eq("buyer_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -80,7 +81,7 @@ const BuyerDashboard = () => {
     setPayingId(orderId);
     const { error } = await supabase
       .from("orders")
-      .update({ status: "paid" })
+      .update({ payment_status: "paid" })
       .eq("id", orderId);
 
     if (error) {
@@ -93,7 +94,7 @@ const BuyerDashboard = () => {
   };
 
   const orderCount = orders.length;
-  const paidOrders = orders.filter((o) => o.status === "paid" || o.status === "completed").length;
+  const paidOrders = orders.filter((o) => o.payment_status === "paid").length;
 
   return (
     <div className="min-h-screen bg-background">
@@ -111,6 +112,11 @@ const BuyerDashboard = () => {
             <p className="text-muted-foreground font-body">
               Track your purchases and manage payments
             </p>
+            {role === "admin" && (
+              <Button variant="outline" size="sm" asChild className="mt-3 border-primary/30 text-primary">
+                <Link to="/admin"><Shield className="w-4 h-4 mr-1" /> Admin Panel</Link>
+              </Button>
+            )}
           </motion.div>
 
           {/* Quick stats */}
@@ -118,7 +124,7 @@ const BuyerDashboard = () => {
             {[
               { icon: ShoppingCart, label: "Total Orders", value: String(orderCount) },
               { icon: CreditCard, label: "Paid", value: String(paidOrders) },
-              { icon: Star, label: "Pending", value: String(orders.filter((o) => o.status === "pending").length) },
+              { icon: Star, label: "Pending", value: String(orders.filter((o) => o.payment_status === "pending").length) },
             ].map((s, i) => (
               <motion.div
                 key={s.label}
@@ -172,12 +178,19 @@ const BuyerDashboard = () => {
                         <div className="flex items-center gap-2">
                           <Badge
                             variant={
-                              order.status === "completed" ? "default" :
-                              order.status === "paid" ? "secondary" : "outline"
+                              order.status === "delivered" ? "default" : "outline"
                             }
                             className="text-xs capitalize"
                           >
                             {order.status}
+                          </Badge>
+                          <Badge
+                            variant={
+                              order.payment_status === "paid" ? "secondary" : "outline"
+                            }
+                            className="text-xs capitalize"
+                          >
+                            {order.payment_status === "paid" ? "💰 Paid" : "Payment Pending"}
                           </Badge>
                           <p className="font-body font-bold text-foreground">₹{order.total}</p>
                         </div>
@@ -187,7 +200,7 @@ const BuyerDashboard = () => {
                           {item.product_name} x{item.quantity} — <span className="text-muted-foreground">by {item.seller_name}</span>
                         </div>
                       ))}
-                      {order.status === "pending" && (
+                      {order.payment_status === "pending" && (
                         <Button
                           size="sm"
                           className="mt-3"

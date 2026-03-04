@@ -21,25 +21,25 @@ const Footer = () => {
             <ul className="space-y-2 text-sm text-secondary-foreground/70">
               <li><Link to="/marketplace" className="hover:text-gold transition-colors">Marketplace</Link></li>
               <li><Link to="/about" className="hover:text-gold transition-colors">About Us</Link></li>
-              <li><Link to="/" className="hover:text-gold transition-colors">Success Stories</Link></li>
+              <li><Link to="/success-stories" className="hover:text-gold transition-colors">Success Stories</Link></li>
             </ul>
           </div>
 
           <div>
             <h4 className="font-display text-sm font-semibold text-gold mb-4">For Sellers</h4>
             <ul className="space-y-2 text-sm text-secondary-foreground/70">
-              <li><Link to="/signup" className="hover:text-gold transition-colors">Start Selling</Link></li>
-              <li><Link to="/" className="hover:text-gold transition-colors">Seller Guide</Link></li>
-              <li><Link to="/" className="hover:text-gold transition-colors">FSSAI Info</Link></li>
+              <li><Link to="/become-seller" className="hover:text-gold transition-colors">Start Selling</Link></li>
+              <li><Link to="/seller-guide" className="hover:text-gold transition-colors">Seller Guide</Link></li>
+              <li><Link to="/fssai-info" className="hover:text-gold transition-colors">FSSAI Info</Link></li>
             </ul>
           </div>
 
           <div>
             <h4 className="font-display text-sm font-semibold text-gold mb-4">Support</h4>
             <ul className="space-y-2 text-sm text-secondary-foreground/70">
-              <li><Link to="/" className="hover:text-gold transition-colors">Help Center</Link></li>
-              <li><Link to="/" className="hover:text-gold transition-colors">Contact Us</Link></li>
-              <li><Link to="/" className="hover:text-gold transition-colors">Privacy Policy</Link></li>
+              <li><Link to="/help-center" className="hover:text-gold transition-colors">Help Center</Link></li>
+              <li><Link to="/contact-us" className="hover:text-gold transition-colors">Contact Us</Link></li>
+              <li><Link to="/privacy-policy" className="hover:text-gold transition-colors">Privacy Policy</Link></li>
             </ul>
           </div>
         </div>

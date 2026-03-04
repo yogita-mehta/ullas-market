@@ -1,10 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Menu, X, ShoppingBag, LogOut, User, Store, Shield } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 
 const navLinks = [
   { label: "Home", to: "/" },
@@ -14,26 +13,10 @@ const navLinks = [
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
-  const { user, signOut } = useAuth();
-  const [isSeller, setIsSeller] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { user, signOut, role } = useAuth();
 
-  useEffect(() => {
-    if (!user) { setIsSeller(false); setIsAdmin(false); return; }
-
-    const fetchRoles = async () => {
-      const { data } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id);
-
-      const roles = (data || []).map((r) => r.role);
-      setIsSeller(roles.includes("seller"));
-      setIsAdmin(roles.includes("admin"));
-    };
-    fetchRoles();
-  }, [user]);
-
+  const isSeller = role === "seller" || role === "admin";
+  const isAdmin = role === "admin";
   const dashboardLink = isSeller ? "/seller" : "/buyer";
 
   return (

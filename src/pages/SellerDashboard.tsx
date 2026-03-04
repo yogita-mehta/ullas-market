@@ -4,19 +4,22 @@ import { supabase } from "@/integrations/supabase/client";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import AddProductDialog from "@/components/AddProductDialog";
+import EditProductDialog from "@/components/EditProductDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Package, TrendingUp, ShoppingCart, Bell, Loader2, CheckCircle, Shield, AlertTriangle, XCircle } from "lucide-react";
+import { Package, TrendingUp, ShoppingCart, Bell, Loader2, CheckCircle, Shield, AlertTriangle, XCircle, Pencil, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
+import { Link } from "react-router-dom";
 
 type Product = Tables<"products">;
 
 interface OrderWithDetails {
   id: string;
   status: string;
+  payment_status: string;
   total: number;
   created_at: string;
   buyer_id: string;
@@ -25,7 +28,7 @@ interface OrderWithDetails {
 }
 
 const SellerDashboard = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<OrderWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +36,10 @@ const SellerDashboard = () => {
   const [fssaiStatus, setFssaiStatus] = useState<string>("pending");
   const [fssaiVerified, setFssaiVerified] = useState(false);
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [editingProduct, setEditingProduct] = useState<Tables<"products"> | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchData = async () => {
     if (!user) return;
@@ -84,7 +91,7 @@ const SellerDashboard = () => {
       const orderIds = [...new Set(orderItems.map((oi) => oi.order_id))];
       const { data: ordersData } = await supabase
         .from("orders")
-        .select("id, status, total, created_at, buyer_id")
+        .select("id, status, payment_status, total, created_at, buyer_id")
         .in("id", orderIds)
         .order("created_at", { ascending: false });
 
@@ -115,33 +122,78 @@ const SellerDashboard = () => {
     }
 
     setLoading(false);
+
+    // Fetch unread notification count
+    const { count } = await supabase
+      .from("notifications")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("is_read", false);
+
+    setUnreadNotifications(count || 0);
+  };
+
+  const handleEdit = (product: Tables<"products">) => {
+    setEditingProduct(product);
+    setEditDialogOpen(true);
+  };
+
+  const handleDelete = async (productId: string, productName: string) => {
+    if (!confirm(`Are you sure you want to delete "${productName}"? This cannot be undone.`)) return;
+    setDeletingId(productId);
+
+    // First, delete associated order_items to avoid foreign key constraint violation
+    const { error: orderItemsError } = await supabase
+      .from("order_items")
+      .delete()
+      .eq("product_id", productId);
+
+    if (orderItemsError) {
+      toast({ title: "Error", description: orderItemsError.message, variant: "destructive" });
+      setDeletingId(null);
+      return;
+    }
+
+    // Now delete the product itself
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", productId);
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Product deleted", description: `"${productName}" has been removed.` });
+      fetchData();
+    }
+    setDeletingId(null);
   };
 
   useEffect(() => {
     fetchData();
   }, [user]);
 
-  const markCompleted = async (orderId: string) => {
+  const markDelivered = async (orderId: string) => {
     setUpdatingOrder(orderId);
     const { error } = await supabase
       .from("orders")
-      .update({ status: "completed" })
+      .update({ status: "delivered" })
       .eq("id", orderId);
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Order completed!", description: "The buyer has been notified." });
+      toast({ title: "Order delivered!", description: "The buyer has been notified." });
       fetchData();
     }
     setUpdatingOrder(null);
   };
 
   const totalEarnings = orders
-    .filter((o) => o.status === "completed" || o.status === "paid")
+    .filter((o) => o.payment_status === "paid")
     .reduce((sum, o) => sum + o.total, 0);
 
-  const activeOrders = orders.filter((o) => o.status === "paid" || o.status === "pending").length;
+  const activeOrders = orders.filter((o) => o.status === "pending" || o.status === "accepted" || o.status === "shipped").length;
 
   const stats = [
     { label: "Total Products", value: String(products.length), icon: Package, color: "text-primary" },
@@ -223,8 +275,21 @@ const SellerDashboard = () => {
               <p className="text-muted-foreground font-body">Welcome back, {userName} 👋</p>
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" size="sm">
-                <Bell className="w-4 h-4" /> Notifications
+              {role === "admin" && (
+                <Button variant="outline" size="sm" asChild className="border-primary/30 text-primary">
+                  <Link to="/admin"><Shield className="w-4 h-4 mr-1" /> Admin Panel</Link>
+                </Button>
+              )}
+              <Button variant="outline" size="sm" asChild className="relative">
+                <Link to="/notifications">
+                  <Bell className="w-4 h-4" />
+                  <span className="ml-1">Notifications</span>
+                  {unreadNotifications > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                      {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                    </span>
+                  )}
+                </Link>
               </Button>
               <AddProductDialog onProductAdded={fetchData} disabled={!fssaiVerified} />
             </div>
@@ -288,11 +353,34 @@ const SellerDashboard = () => {
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="flex items-center gap-2">
                         <p className="font-body font-bold text-primary">₹{p.price}</p>
                         <Badge variant={p.is_active ? "default" : "secondary"} className="text-xs">
                           {p.is_active ? "Active" : "Inactive"}
                         </Badge>
+                      </div>
+                      <div className="flex gap-1 mt-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-muted-foreground hover:text-primary"
+                          onClick={() => handleEdit(p)}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-muted-foreground hover:text-red-500"
+                          onClick={() => handleDelete(p.id, p.name)}
+                          disabled={deletingId === p.id}
+                        >
+                          {deletingId === p.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -332,12 +420,19 @@ const SellerDashboard = () => {
                         <div className="flex items-center gap-2">
                           <Badge
                             variant={
-                              order.status === "completed" ? "default" :
-                                order.status === "paid" ? "secondary" : "outline"
+                              order.status === "delivered" ? "default" : "outline"
                             }
                             className="text-xs capitalize"
                           >
                             {order.status}
+                          </Badge>
+                          <Badge
+                            variant={
+                              order.payment_status === "paid" ? "secondary" : "outline"
+                            }
+                            className="text-xs capitalize"
+                          >
+                            {order.payment_status === "paid" ? "💰 Paid" : "Payment Pending"}
                           </Badge>
                           <p className="font-body font-bold text-foreground">₹{order.total}</p>
                         </div>
@@ -350,10 +445,10 @@ const SellerDashboard = () => {
                           </span>
                         ))}
                       </div>
-                      {order.status === "paid" && (
+                      {order.payment_status === "paid" && order.status !== "delivered" && (
                         <Button
                           size="sm"
-                          onClick={() => markCompleted(order.id)}
+                          onClick={() => markDelivered(order.id)}
                           disabled={updatingOrder === order.id}
                         >
                           {updatingOrder === order.id ? (
@@ -361,7 +456,7 @@ const SellerDashboard = () => {
                           ) : (
                             <CheckCircle className="w-4 h-4 mr-1" />
                           )}
-                          Mark as Completed
+                          Mark as Delivered
                         </Button>
                       )}
                     </div>
@@ -373,6 +468,12 @@ const SellerDashboard = () => {
         </div>
       </div>
       <Footer />
+      <EditProductDialog
+        product={editingProduct}
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        onProductUpdated={fetchData}
+      />
     </div>
   );
 };

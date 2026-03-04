@@ -64,6 +64,7 @@ interface ProductWithSeller {
 interface OrderWithDetails {
   id: string;
   status: string;
+  payment_status: string;
   total: number;
   created_at: string;
   buyer_id: string;
@@ -347,12 +348,27 @@ const AdminPanel = () => {
 
   const getOrderStatusBadge = (status: string) => {
     switch (status) {
-      case "completed":
-        return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-xs capitalize">Completed</Badge>;
-      case "paid":
-        return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-xs capitalize">Paid</Badge>;
+      case "delivered":
+        return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-xs capitalize">Delivered</Badge>;
+      case "shipped":
+        return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-xs capitalize">Shipped</Badge>;
+      case "accepted":
+        return <Badge className="bg-violet-100 text-violet-800 hover:bg-violet-100 text-xs capitalize">Accepted</Badge>;
+      case "cancelled":
+        return <Badge className="bg-red-100 text-red-800 hover:bg-red-100 text-xs capitalize">Cancelled</Badge>;
       default:
         return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 text-xs capitalize">Pending</Badge>;
+    }
+  };
+
+  const getPaymentStatusBadge = (paymentStatus: string) => {
+    switch (paymentStatus) {
+      case "paid":
+        return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-xs">💰 Paid</Badge>;
+      case "failed":
+        return <Badge className="bg-red-100 text-red-800 hover:bg-red-100 text-xs">Payment Failed</Badge>;
+      default:
+        return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 text-xs">Payment Pending</Badge>;
     }
   };
 
@@ -672,7 +688,7 @@ const AdminPanel = () => {
                       <Badge variant="secondary" className="ml-2 text-xs">{orders.length} total</Badge>
                     </CardTitle>
                     <div className="flex gap-2 flex-wrap">
-                      {["all", "pending", "paid", "completed"].map((f) => (
+                      {["all", "pending", "accepted", "shipped", "delivered", "cancelled"].map((f) => (
                         <Button
                           key={f}
                           variant={orderFilter === f ? "default" : "outline"}
@@ -702,6 +718,7 @@ const AdminPanel = () => {
                                 {order.buyer_name}
                               </p>
                               {getOrderStatusBadge(order.status)}
+                              {getPaymentStatusBadge(order.payment_status)}
                             </div>
                             <p className="text-xs text-muted-foreground font-body">
                               {new Date(order.created_at).toLocaleDateString("en-IN", {

@@ -96,6 +96,7 @@ const Marketplace = () => {
         .from("orders")
         .insert({
           buyer_id: user.id,
+          seller_id: product.seller_id,
           total: product.price,
           status: "pending",
         })
