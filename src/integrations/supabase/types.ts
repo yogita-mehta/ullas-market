@@ -12,6 +12,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      addresses: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          phone: string | null
+          village: string | null
+          district: string | null
+          state: string | null
+          pincode: string | null
+          latitude: number | null
+          longitude: number | null
+          is_default: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          phone?: string | null
+          village?: string | null
+          district?: string | null
+          state?: string | null
+          pincode?: string | null
+          latitude?: number | null
+          longitude?: number | null
+          is_default?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          phone?: string | null
+          village?: string | null
+          district?: string | null
+          state?: string | null
+          pincode?: string | null
+          latitude?: number | null
+          longitude?: number | null
+          is_default?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
       buyer_preferences: {
         Row: {
           id: string
@@ -27,6 +72,98 @@ export type Database = {
           id?: string
           user_id?: string
           category?: string
+        }
+        Relationships: []
+      }
+      cart_items: {
+        Row: {
+          id: string
+          user_id: string
+          product_id: string
+          quantity: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          product_id: string
+          quantity?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          product_id?: string
+          quantity?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cart_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_batches: {
+        Row: {
+          id: string
+          village: string
+          district: string | null
+          status: string
+          delivery_partner: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          village: string
+          district?: string | null
+          status?: string
+          delivery_partner?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          village?: string
+          district?: string | null
+          status?: string
+          delivery_partner?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      delivery_partners: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          phone: string | null
+          vehicle_type: string | null
+          assigned_village: string | null
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          phone?: string | null
+          vehicle_type?: string | null
+          assigned_village?: string | null
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          phone?: string | null
+          vehicle_type?: string | null
+          assigned_village?: string | null
+          status?: string
+          created_at?: string
         }
         Relationships: []
       }
@@ -59,6 +196,7 @@ export type Database = {
           price: number
           product_id: string
           quantity: number
+          seller_id: string | null
         }
         Insert: {
           created_at?: string
@@ -67,6 +205,7 @@ export type Database = {
           price: number
           product_id: string
           quantity?: number
+          seller_id?: string | null
         }
         Update: {
           created_at?: string
@@ -75,6 +214,7 @@ export type Database = {
           price?: number
           product_id?: string
           quantity?: number
+          seller_id?: string | null
         }
         Relationships: [
           {
@@ -125,11 +265,16 @@ export type Database = {
       }
       orders: {
         Row: {
+          address_id: string | null
+          batch_id: string | null
           buyer_id: string
-          seller_id: string | null
           created_at: string
+          delivery_status: string | null
           id: string
+          payment_id: string | null
+          payment_method: string | null
           payment_status: string
+          seller_id: string | null
           shipping_address: string | null
           shipping_district: string | null
           status: string
@@ -138,11 +283,16 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          address_id?: string | null
+          batch_id?: string | null
           buyer_id: string
-          seller_id?: string | null
           created_at?: string
+          delivery_status?: string | null
           id?: string
+          payment_id?: string | null
+          payment_method?: string | null
           payment_status?: string
+          seller_id?: string | null
           shipping_address?: string | null
           shipping_district?: string | null
           status?: string
@@ -151,11 +301,16 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          address_id?: string | null
+          batch_id?: string | null
           buyer_id?: string
-          seller_id?: string | null
           created_at?: string
+          delivery_status?: string | null
           id?: string
+          payment_id?: string | null
+          payment_method?: string | null
           payment_status?: string
+          seller_id?: string | null
           shipping_address?: string | null
           shipping_district?: string | null
           status?: string
@@ -163,7 +318,15 @@ export type Database = {
           total_price?: number | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "orders_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_batches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       products: {
         Row: {
@@ -230,11 +393,16 @@ export type Database = {
           full_name: string | null
           id: string
           language_preference: string | null
+          latitude: number | null
           location: string | null
+          longitude: number | null
           phone: string | null
+          pincode: string | null
           role: string | null
+          state: string | null
           updated_at: string
           user_id: string
+          village: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -244,11 +412,16 @@ export type Database = {
           full_name?: string | null
           id?: string
           language_preference?: string | null
+          latitude?: number | null
           location?: string | null
+          longitude?: number | null
           phone?: string | null
+          pincode?: string | null
           role?: string | null
+          state?: string | null
           updated_at?: string
           user_id: string
+          village?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -258,11 +431,16 @@ export type Database = {
           full_name?: string | null
           id?: string
           language_preference?: string | null
+          latitude?: number | null
           location?: string | null
+          longitude?: number | null
           phone?: string | null
+          pincode?: string | null
           role?: string | null
+          state?: string | null
           updated_at?: string
           user_id?: string
+          village?: string | null
         }
         Relationships: []
       }
@@ -458,9 +636,26 @@ export type Database = {
         }
         Returns: boolean
       }
+      get_user_id_by_email: {
+        Args: {
+          lookup_email: string
+        }
+        Returns: string
+      }
+      delete_user_account: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      decrement_stock: {
+        Args: {
+          p_product_id: string
+          p_quantity: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
-      app_role: "seller" | "buyer" | "admin"
+      app_role: "seller" | "buyer" | "admin" | "delivery_partner"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -588,7 +783,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["seller", "buyer", "admin"],
+      app_role: ["seller", "buyer", "admin", "delivery_partner"],
     },
   },
 } as const

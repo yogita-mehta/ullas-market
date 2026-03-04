@@ -21,7 +21,7 @@ const Signup = () => {
     e.preventDefault();
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -31,11 +31,26 @@ const Signup = () => {
     });
 
     if (error) {
-      toast({ variant: "destructive", title: "Signup failed", description: error.message });
+      if (error.message.toLowerCase().includes("rate limit")) {
+        toast({
+          variant: "destructive",
+          title: "Too many attempts",
+          description: "Please wait a few minutes before trying again, or try logging in if you already have an account.",
+        });
+      } else {
+        toast({ variant: "destructive", title: "Signup failed", description: error.message });
+      }
+    } else if (data?.user?.identities?.length === 0) {
+      // Account already exists (Supabase returns empty identities)
+      toast({
+        variant: "destructive",
+        title: "Account already exists",
+        description: "An account with this email already exists. Please sign in instead.",
+      });
     } else {
       toast({
-        title: "Account created!",
-        description: "Please check your email to verify your account.",
+        title: "Account created! 🎉",
+        description: "You can now log in with your credentials.",
       });
       navigate("/login");
     }
