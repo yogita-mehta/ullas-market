@@ -26,7 +26,7 @@ const HeroSection = () => {
             transition={{ duration: 0.8, ease: "easeOut" }}
           >
             <span className="inline-block px-4 py-1.5 rounded-full bg-gold/20 text-gold text-sm font-body font-medium mb-6 border border-gold/30">
-              🌾 Powered by Kudumbashree
+              🌾 Built for Kudumbashree
             </span>
           </motion.div>
 
