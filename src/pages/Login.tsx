@@ -112,6 +112,10 @@ const Login = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                    autoComplete="new-email"
+                    inputMode="email"
+                    autoCorrect="off"
+                    autoCapitalize="none"
                   />
                 </div>
               </div>

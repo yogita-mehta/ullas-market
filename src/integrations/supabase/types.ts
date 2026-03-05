@@ -345,6 +345,7 @@ export type Database = {
           seller_id: string
           stock: number
           updated_at: string
+          view_count: number
         }
         Insert: {
           category?: string
@@ -379,6 +380,7 @@ export type Database = {
           seller_id?: string
           stock?: number
           updated_at?: string
+          view_count?: number
         }
         Relationships: []
       }
@@ -492,6 +494,7 @@ export type Database = {
           updated_at: string
           user_id: string
           verification_status: string | null
+          trust_score: number
         }
         Insert: {
           business_name: string
@@ -522,6 +525,64 @@ export type Database = {
           updated_at?: string
           user_id?: string
           verification_status?: string | null
+          trust_score?: number
+        }
+        Relationships: []
+      }
+      risk_flags: {
+        Row: {
+          id: string
+          seller_id: string
+          flag_type: string
+          details: string | null
+          severity: string
+          resolved: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          seller_id: string
+          flag_type: string
+          details?: string | null
+          severity?: string
+          resolved?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          seller_id?: string
+          flag_type?: string
+          details?: string | null
+          severity?: string
+          resolved?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      dish_dictionary: {
+        Row: {
+          id: string
+          local_name: string
+          official_name: string
+          short_description: string | null
+          category: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          local_name: string
+          official_name: string
+          short_description?: string | null
+          category?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          local_name?: string
+          official_name?: string
+          short_description?: string | null
+          category?: string | null
+          created_at?: string
         }
         Relationships: []
       }
