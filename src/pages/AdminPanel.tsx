@@ -52,6 +52,7 @@ interface SellerProfile {
   kudumbashree_unit: string | null;
   created_at: string;
   seller_name?: string;
+  trust_score?: number;
 }
 
 interface ProductWithSeller {
@@ -105,6 +106,18 @@ interface DeliveryPartnerInfo {
 // Track whether new columns exist in the DB
 let hasNewColumns: boolean | null = null;
 
+interface RiskFlagItem {
+  id: string;
+  seller_id: string;
+  flag_type: string;
+  details: string | null;
+  severity: string;
+  resolved: boolean;
+  created_at: string;
+  seller_name?: string;
+  business_name?: string;
+}
+
 const AdminPanel = () => {
   const [sellers, setSellers] = useState<SellerProfile[]>([]);
   const [products, setProducts] = useState<ProductWithSeller[]>([]);
@@ -117,6 +130,8 @@ const AdminPanel = () => {
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [certificateUrl, setCertificateUrl] = useState<string | null>(null);
+  const [riskFlags, setRiskFlags] = useState<RiskFlagItem[]>([]);
+  const [runningMonitor, setRunningMonitor] = useState(false);
   const [deliveryBatches, setDeliveryBatches] = useState<DeliveryBatchWithCount[]>([]);
   const [deliveryPartners, setDeliveryPartners] = useState<DeliveryPartnerInfo[]>([]);
   const [assigningBatchId, setAssigningBatchId] = useState<string | null>(null);
@@ -172,6 +187,7 @@ const AdminPanel = () => {
           fssai_status: s.fssai_status || (s.fssai_verified ? "approved" : "pending"),
           rejection_reason: s.rejection_reason || null,
           seller_name: nameMap.get(s.user_id) || "Unknown",
+          trust_score: (s as any).trust_score ?? 100,
         }))
       );
     }
@@ -248,7 +264,6 @@ const AdminPanel = () => {
       .order("created_at", { ascending: false });
 
     if (batchesData) {
-      // Get order counts per batch
       const batchIds = batchesData.map((b) => b.id);
       const { data: ordersInBatches } = await supabase
         .from("orders")
@@ -260,7 +275,6 @@ const AdminPanel = () => {
         if (o.batch_id) countMap.set(o.batch_id, (countMap.get(o.batch_id) || 0) + 1);
       });
 
-      // Get partner names
       const partnerIds = batchesData.map((b) => b.delivery_partner).filter(Boolean) as string[];
       let partnerNameMap = new Map<string, string>();
       if (partnerIds.length > 0) {
@@ -302,14 +316,12 @@ const AdminPanel = () => {
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      // Notify the delivery partner
       await supabase.from("notifications").insert({
         user_id: partnerUserId,
         title: "New Batch Assigned! 📦",
         message: "A new delivery batch has been assigned to you. Check your delivery dashboard.",
         type: "delivery",
       });
-
       toast({ title: "Partner Assigned ✓", description: "Delivery partner has been assigned to the batch." });
       fetchDeliveryBatches();
     }
@@ -325,7 +337,6 @@ const AdminPanel = () => {
 
     setRegisteringPartner(true);
     try {
-      // Look up user by email via admin RPC function
       const { data: userId, error: lookupError } = await supabase
         .rpc("get_user_id_by_email", { lookup_email: newPartnerEmail.trim() });
 
@@ -335,19 +346,16 @@ const AdminPanel = () => {
         return;
       }
 
-      // Assign delivery_partner role
       const { error: roleError } = await supabase
         .from("user_roles")
         .insert({ user_id: userId, role: "delivery_partner" });
       if (roleError && !roleError.message.includes("duplicate")) throw roleError;
 
-      // Update profiles table role
       await supabase
         .from("profiles")
         .update({ role: "delivery_partner" })
         .eq("user_id", userId);
 
-      // Create delivery partner profile
       const { error: dpError } = await supabase
         .from("delivery_partners")
         .insert({
@@ -378,11 +386,76 @@ const AdminPanel = () => {
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
-      await Promise.all([fetchSellers(), fetchProducts(), fetchOrders(), fetchDeliveryBatches(), fetchDeliveryPartners()]);
+      await Promise.all([fetchSellers(), fetchProducts(), fetchOrders(), fetchRiskFlags(), fetchDeliveryBatches(), fetchDeliveryPartners()]);
       setLoading(false);
     };
     fetchAll();
   }, []);
+
+  const fetchRiskFlags = async () => {
+    const { data: flags } = await supabase
+      .from("risk_flags" as any)
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (flags && (flags as any[]).length > 0) {
+      const sellerIds = [...new Set((flags as any[]).map((f: any) => f.seller_id))];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, full_name")
+        .in("user_id", sellerIds);
+      const { data: sellerProfs } = await supabase
+        .from("seller_profiles")
+        .select("user_id, business_name")
+        .in("user_id", sellerIds);
+
+      const nameMap = new Map((profiles || []).map((p) => [p.user_id, p.full_name || "Unknown"]));
+      const bizMap = new Map((sellerProfs || []).map((s) => [s.user_id, s.business_name]));
+
+      setRiskFlags(
+        (flags as any[]).map((f: any) => ({
+          ...f,
+          seller_name: nameMap.get(f.seller_id) || "Unknown",
+          business_name: bizMap.get(f.seller_id) || "Unknown",
+        }))
+      );
+    } else {
+      setRiskFlags([]);
+    }
+  };
+
+  const handleResolveFlag = async (flagId: string) => {
+    setActionLoadingId(flagId);
+    const { error } = await supabase
+      .from("risk_flags" as any)
+      .update({ resolved: true } as any)
+      .eq("id", flagId);
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Flag Resolved", description: "Risk flag has been marked as resolved." });
+      fetchRiskFlags();
+    }
+    setActionLoadingId(null);
+  };
+
+  const handleRunTrustMonitor = async () => {
+    setRunningMonitor(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("trust-monitor", { body: {} });
+      if (error) throw error;
+      toast({
+        title: "Trust Monitor Complete",
+        description: `Created ${data?.new_flags_created || 0} new flags.`,
+      });
+      await Promise.all([fetchRiskFlags(), fetchSellers()]);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setRunningMonitor(false);
+    }
+  };
 
   const handleApproveSeller = async (seller: SellerProfile) => {
     setActionLoadingId(seller.id);
@@ -605,7 +678,7 @@ const AdminPanel = () => {
 
           {/* Tabs */}
           <Tabs defaultValue="sellers" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="sellers" className="font-body text-sm">
                 <Shield className="w-4 h-4 mr-1.5" />
                 Sellers
@@ -626,6 +699,15 @@ const AdminPanel = () => {
               <TabsTrigger value="logistics" className="font-body text-sm">
                 <Truck className="w-4 h-4 mr-1.5" />
                 Logistics
+              </TabsTrigger>
+              <TabsTrigger value="trust" className="font-body text-sm">
+                <AlertTriangle className="w-4 h-4 mr-1.5" />
+                Trust
+                {riskFlags.filter(f => !f.resolved).length > 0 && (
+                  <span className="ml-1.5 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {riskFlags.filter(f => !f.resolved).length}
+                  </span>
+                )}
               </TabsTrigger>
             </TabsList>
 
@@ -926,6 +1008,7 @@ const AdminPanel = () => {
                 </CardContent>
               </Card>
             </TabsContent>
+
             {/* ====== LOGISTICS TAB ====== */}
             <TabsContent value="logistics">
               <div className="space-y-6">
@@ -1172,6 +1255,106 @@ const AdminPanel = () => {
                   </CardContent>
                 </Card>
               </div>
+            </TabsContent>
+
+            {/* ====== TRUST & RISK TAB ====== */}
+            <TabsContent value="trust">
+              <Card className="shadow-card">
+                <CardHeader>
+                  <div className="flex flex-col sm:flex-row justify-between gap-4">
+                    <CardTitle className="font-display text-lg flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5 text-red-500" />
+                      Trust & Risk Monitoring
+                      <Badge variant="secondary" className="ml-2 text-xs">
+                        {riskFlags.filter(f => !f.resolved).length} active flags
+                      </Badge>
+                    </CardTitle>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRunTrustMonitor}
+                      disabled={runningMonitor}
+                    >
+                      {runningMonitor ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                      ) : (
+                        <Shield className="w-4 h-4 mr-1" />
+                      )}
+                      Run Trust Monitor
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {riskFlags.length === 0 ? (
+                    <div className="text-center py-10">
+                      <Shield className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                      <p className="text-muted-foreground font-body text-sm">No risk flags found. Run the trust monitor to scan for issues.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {riskFlags.map((flag) => (
+                        <div
+                          key={flag.id}
+                          className={`p-4 rounded-xl ${flag.resolved ? 'bg-muted/30 opacity-60' : 'bg-muted/50'}`}
+                        >
+                          <div className="flex flex-col sm:flex-row justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <p className="font-body font-semibold text-sm text-foreground">
+                                  {flag.business_name}
+                                </p>
+                                <Badge
+                                  className={`text-xs ${flag.severity === 'high'
+                                    ? 'bg-red-100 text-red-800 hover:bg-red-100'
+                                    : flag.severity === 'medium'
+                                      ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
+                                      : 'bg-blue-100 text-blue-800 hover:bg-blue-100'
+                                    }`}
+                                >
+                                  {flag.severity.toUpperCase()}
+                                </Badge>
+                                <Badge variant="outline" className="text-xs capitalize">
+                                  {flag.flag_type.replace(/_/g, ' ')}
+                                </Badge>
+                                {flag.resolved && (
+                                  <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-xs">
+                                    ✓ Resolved
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground font-body">
+                                {flag.seller_name} · {new Date(flag.created_at).toLocaleDateString("en-IN")}
+                              </p>
+                              {flag.details && (
+                                <p className="text-xs text-foreground/70 font-body mt-1">
+                                  {flag.details}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-start gap-2 flex-shrink-0">
+                              {!flag.resolved && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                  onClick={() => handleResolveFlag(flag.id)}
+                                  disabled={actionLoadingId === flag.id}
+                                >
+                                  {actionLoadingId === flag.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <><CheckCircle className="w-4 h-4 mr-1" /> Resolve</>
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
         </div>

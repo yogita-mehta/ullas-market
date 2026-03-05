@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -7,14 +7,23 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Upload, Loader2, ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Upload, Loader2, ShieldAlert, Globe, Sparkles } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import VoiceUploadButton, { type VoiceExtractResult } from "./VoiceUploadButton";
 
 const categories = ["Snacks", "Pickles", "Sweets", "Spices", "Ready-to-Eat"];
 
 interface AddProductDialogProps {
   onProductAdded: () => void;
   disabled?: boolean;
+}
+
+interface PriceSuggestion {
+  min_price: number;
+  max_price: number;
+  avg_price: number;
+  sample_count: number;
 }
 
 const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialogProps) => {
@@ -26,8 +35,14 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
   const [price, setPrice] = useState("");
   const [stock, setStock] = useState("");
   const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [dialectDetected, setDialectDetected] = useState<string | null>(null);
+  const [aiConfidence, setAiConfidence] = useState<number | null>(null);
+  const [priceSuggestion, setPriceSuggestion] = useState<PriceSuggestion | null>(null);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+  const priceDebounceRef = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -43,8 +58,64 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
     setPrice("");
     setStock("");
     setCategory("");
+    setDescription("");
     setImageFile(null);
     setImagePreview(null);
+    setDialectDetected(null);
+    setAiConfidence(null);
+    setPriceSuggestion(null);
+  };
+
+  const fetchPriceSuggestion = useCallback(async (productName: string, productCategory?: string) => {
+    if (!productName || productName.length < 3) {
+      setPriceSuggestion(null);
+      return;
+    }
+    setFetchingPrice(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("suggest-price", {
+        body: { product_name: productName, category: productCategory || undefined },
+      });
+      if (!error && data && data.sample_count >= 2) {
+        setPriceSuggestion(data as PriceSuggestion);
+      } else {
+        setPriceSuggestion(null);
+      }
+    } catch {
+      setPriceSuggestion(null);
+    } finally {
+      setFetchingPrice(false);
+    }
+  }, []);
+
+  const handleNameChange = (newName: string) => {
+    setName(newName);
+    // Debounce price suggestion
+    if (priceDebounceRef[0]) clearTimeout(priceDebounceRef[0]);
+    const timer = setTimeout(() => {
+      fetchPriceSuggestion(newName, category);
+    }, 800);
+    priceDebounceRef[1](timer);
+  };
+
+  const handleVoiceResult = (result: VoiceExtractResult) => {
+    if (result.official_name) setName(result.official_name);
+    if (result.local_name) setLocalName(result.local_name);
+    if (result.price && result.price > 0) setPrice(String(result.price));
+    if (result.quantity && result.quantity > 0) setStock(String(result.quantity));
+    if (result.category && categories.includes(result.category)) setCategory(result.category);
+    if (result.full_description) {
+      setDescription(result.full_description);
+    } else if (result.short_description) {
+      setDescription(result.short_description);
+    }
+    if (result.dialect_detected) setDialectDetected(result.dialect_detected);
+    if (result.ai_confidence !== undefined) setAiConfidence(result.ai_confidence);
+
+    // Trigger price suggestion for the extracted name
+    if (result.official_name) {
+      fetchPriceSuggestion(result.official_name, result.category);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,6 +148,7 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
         seller_id: user.id,
         name,
         local_name: localName || null,
+        description: description || null,
         price: parseInt(price),
         stock: parseInt(stock),
         category,
@@ -120,23 +192,64 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
           <Plus className="w-4 h-4" /> Add Product
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Add New Product</DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="font-display">Add New Product</DialogTitle>
+            <VoiceUploadButton onResult={handleVoiceResult} disabled={loading} />
+          </div>
         </DialogHeader>
+
+        {/* Dialect & AI Confidence Badges */}
+        {dialectDetected && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="secondary" className="gap-1 text-xs">
+              <Globe className="w-3 h-3" />
+              {dialectDetected}
+            </Badge>
+            {aiConfidence !== null && (
+              <Badge variant="outline" className="gap-1 text-xs">
+                <Sparkles className="w-3 h-3" />
+                AI Confidence: {Math.round(aiConfidence * 100)}%
+              </Badge>
+            )}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <Label htmlFor="name">Product Name *</Label>
-            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kerala Banana Chips" />
+            <Input id="name" value={name} onChange={(e) => handleNameChange(e.target.value)} placeholder="e.g. Kerala Banana Chips" />
           </div>
           <div>
             <Label htmlFor="localName">Local Name</Label>
             <Input id="localName" value={localName} onChange={(e) => setLocalName(e.target.value)} placeholder="e.g. Nenthra Kaaya Chips" />
           </div>
+          <div>
+            <Label htmlFor="description">Description</Label>
+            <Input id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Product description" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="price">Price (₹) *</Label>
               <Input id="price" type="number" min="1" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="180" />
+              {/* AI Price Suggestion */}
+              {fetchingPrice && (
+                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Checking prices...
+                </p>
+              )}
+              {priceSuggestion && !fetchingPrice && (
+                <div className="mt-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20">
+                  <p className="text-xs font-body text-primary font-medium flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    AI Suggested: ₹{priceSuggestion.min_price} – ₹{priceSuggestion.max_price}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Avg ₹{priceSuggestion.avg_price} · {priceSuggestion.sample_count} similar products
+                  </p>
+                </div>
+              )}
             </div>
             <div>
               <Label htmlFor="stock">Quantity *</Label>
@@ -145,7 +258,7 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
           </div>
           <div>
             <Label>Category *</Label>
-            <Select value={category} onValueChange={setCategory}>
+            <Select value={category} onValueChange={(val) => { setCategory(val); if (name) fetchPriceSuggestion(name, val); }}>
               <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
               <SelectContent>
                 {categories.map((c) => (
