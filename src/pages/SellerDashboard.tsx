@@ -8,7 +8,7 @@ import EditProductDialog from "@/components/EditProductDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Package, TrendingUp, ShoppingCart, Bell, Loader2, CheckCircle, Shield, AlertTriangle, XCircle, Pencil, Trash2, Truck } from "lucide-react";
+import { Package, TrendingUp, ShoppingCart, Bell, Loader2, CheckCircle, Shield, AlertTriangle, XCircle, Pencil, Trash2, Truck, Store } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
@@ -366,7 +366,13 @@ const SellerDashboard = () => {
               </h1>
               <p className="text-muted-foreground font-body">Welcome back, {userName} 👋</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/marketplace"><Store className="w-4 h-4 mr-1" /> Marketplace</Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/buyer"><ShoppingCart className="w-4 h-4 mr-1" /> My Orders</Link>
+              </Button>
               {role === "admin" && (
                 <Button variant="outline" size="sm" asChild className="border-primary/30 text-primary">
                   <Link to="/admin"><Shield className="w-4 h-4 mr-1" /> Admin Panel</Link>

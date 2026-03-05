@@ -166,17 +166,22 @@ const Marketplace = () => {
         };
       });
 
+      // Filter out current user's own products
+      const visibleProducts = user
+        ? enrichedProducts.filter((p) => p.seller_id !== user.id)
+        : enrichedProducts;
+
       // Sort by distance if available
-      enrichedProducts.sort((a, b) => {
+      visibleProducts.sort((a, b) => {
         if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
         if (a.distance !== null) return -1;
         if (b.distance !== null) return 1;
         return 0;
       });
 
-      setProducts(enrichedProducts);
+      setProducts(visibleProducts);
 
-      // 7. Build nearby sellers list
+      // 7. Build nearby sellers list (exclude current user's own store)
       const sellerAggMap = new Map<string, { ratings: number[]; productCount: number }>();
       verifiedProducts.forEach((p) => {
         if (!sellerAggMap.has(p.seller_id)) {
@@ -188,31 +193,33 @@ const Marketplace = () => {
         if (pr) agg.ratings.push(...pr);
       });
 
-      const sellers: SellerWithDistance[] = sellerIds.map((sid) => {
-        const sp = sellerProfileMap.get(sid);
-        const vm = verifiedMap.get(sid);
-        const agg = sellerAggMap.get(sid);
-        let dist: number | null = null;
+      const sellers: SellerWithDistance[] = sellerIds
+        .filter((sid) => !user || sid !== user.id) // Hide own store
+        .map((sid) => {
+          const sp = sellerProfileMap.get(sid);
+          const vm = verifiedMap.get(sid);
+          const agg = sellerAggMap.get(sid);
+          let dist: number | null = null;
 
-        if (buyerLat && buyerLon && sp?.latitude && sp?.longitude) {
-          dist = haversineDistance(buyerLat, buyerLon, sp.latitude, sp.longitude);
-        }
+          if (buyerLat && buyerLon && sp?.latitude && sp?.longitude) {
+            dist = haversineDistance(buyerLat, buyerLon, sp.latitude, sp.longitude);
+          }
 
-        return {
-          user_id: sid,
-          full_name: sp?.full_name || null,
-          village: sp?.village || sp?.district || null,
-          district: sp?.district || null,
-          business_name: vm?.business_name,
-          fssai_verified: vm?.fssai_verified ?? false,
-          distance: dist,
-          avgRating:
-            agg && agg.ratings.length > 0
-              ? agg.ratings.reduce((a, b) => a + b, 0) / agg.ratings.length
-              : null,
-          productCount: agg?.productCount || 0,
-        };
-      });
+          return {
+            user_id: sid,
+            full_name: sp?.full_name || null,
+            village: sp?.village || sp?.district || null,
+            district: sp?.district || null,
+            business_name: vm?.business_name,
+            fssai_verified: vm?.fssai_verified ?? false,
+            distance: dist,
+            avgRating:
+              agg && agg.ratings.length > 0
+                ? agg.ratings.reduce((a, b) => a + b, 0) / agg.ratings.length
+                : null,
+            productCount: agg?.productCount || 0,
+          };
+        });
 
       // Filter to 30km and sort by distance
       const nearby = sellers

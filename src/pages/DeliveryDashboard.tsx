@@ -207,10 +207,14 @@ const DeliveryDashboard = () => {
                 updateData.status = "delivered";
             }
 
-            await supabase
+            const { error: ordersError } = await supabase
                 .from("orders")
                 .update(updateData)
                 .eq("batch_id", batchId);
+
+            if (ordersError) {
+                console.error("Failed to update orders (trigger will handle):", ordersError.message);
+            }
 
             // Send notifications to buyers
             const batch = batches.find((b) => b.id === batchId);

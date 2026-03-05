@@ -61,6 +61,11 @@ const Navbar = () => {
               <Button variant="ghost" size="sm" asChild>
                 <Link to={dashboardLink}><User className="w-4 h-4 mr-1" /> Dashboard</Link>
               </Button>
+              {(isSeller || isDeliveryPartner) && (
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to="/buyer"><ShoppingCart className="w-4 h-4 mr-1" /> My Orders</Link>
+                </Button>
+              )}
               {isAdmin && (
                 <Button variant="outline" size="sm" asChild className="border-primary/30 text-primary">
                   <Link to="/admin"><Shield className="w-4 h-4 mr-1" /> Admin</Link>
@@ -131,6 +136,13 @@ const Navbar = () => {
                     <Button variant="outline" size="sm" asChild>
                       <Link to={dashboardLink} onClick={() => setMobileOpen(false)}>Dashboard</Link>
                     </Button>
+                    {(isSeller || isDeliveryPartner) && (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link to="/buyer" onClick={() => setMobileOpen(false)}>
+                          <ShoppingCart className="w-4 h-4 mr-1" /> My Orders
+                        </Link>
+                      </Button>
+                    )}
                     {isAdmin && (
                       <Button variant="outline" size="sm" asChild className="border-primary/30 text-primary">
                         <Link to="/admin" onClick={() => setMobileOpen(false)}>
