@@ -27,8 +27,15 @@ import {
 import {
   Users, Package, ShoppingCart, Shield,
   CheckCircle, XCircle, Eye, Trash2, Loader2, Search,
-  AlertTriangle, FileCheck
+  AlertTriangle, FileCheck, Truck, MapPin, CreditCard
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 
@@ -45,7 +52,6 @@ interface SellerProfile {
   kudumbashree_unit: string | null;
   created_at: string;
   seller_name?: string;
-  trust_score?: number;
 }
 
 interface ProductWithSeller {
@@ -75,20 +81,29 @@ interface OrderWithDetails {
   item_count: number;
 }
 
+interface DeliveryBatchWithCount {
+  id: string;
+  village: string;
+  district: string | null;
+  status: string;
+  delivery_partner: string | null;
+  delivery_partner_name: string | null;
+  created_at: string;
+  order_count: number;
+}
+
+interface DeliveryPartnerInfo {
+  id: string;
+  user_id: string;
+  name: string;
+  phone: string | null;
+  vehicle_type: string | null;
+  assigned_village: string | null;
+  status: string;
+}
+
 // Track whether new columns exist in the DB
 let hasNewColumns: boolean | null = null;
-
-interface RiskFlagItem {
-  id: string;
-  seller_id: string;
-  flag_type: string;
-  details: string | null;
-  severity: string;
-  resolved: boolean;
-  created_at: string;
-  seller_name?: string;
-  business_name?: string;
-}
 
 const AdminPanel = () => {
   const [sellers, setSellers] = useState<SellerProfile[]>([]);
@@ -102,8 +117,16 @@ const AdminPanel = () => {
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [certificateUrl, setCertificateUrl] = useState<string | null>(null);
-  const [riskFlags, setRiskFlags] = useState<RiskFlagItem[]>([]);
-  const [runningMonitor, setRunningMonitor] = useState(false);
+  const [deliveryBatches, setDeliveryBatches] = useState<DeliveryBatchWithCount[]>([]);
+  const [deliveryPartners, setDeliveryPartners] = useState<DeliveryPartnerInfo[]>([]);
+  const [assigningBatchId, setAssigningBatchId] = useState<string | null>(null);
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string>("");
+  const [newPartnerName, setNewPartnerName] = useState("");
+  const [newPartnerPhone, setNewPartnerPhone] = useState("");
+  const [newPartnerVehicle, setNewPartnerVehicle] = useState("");
+  const [newPartnerVillage, setNewPartnerVillage] = useState("");
+  const [newPartnerEmail, setNewPartnerEmail] = useState("");
+  const [registeringPartner, setRegisteringPartner] = useState(false);
 
   // Detect whether new columns exist
   const detectNewColumns = async () => {
@@ -149,7 +172,6 @@ const AdminPanel = () => {
           fssai_status: s.fssai_status || (s.fssai_verified ? "approved" : "pending"),
           rejection_reason: s.rejection_reason || null,
           seller_name: nameMap.get(s.user_id) || "Unknown",
-          trust_score: (s as any).trust_score ?? 100,
         }))
       );
     }
@@ -219,79 +241,148 @@ const AdminPanel = () => {
     }
   };
 
-  useEffect(() => {
-    const fetchAll = async () => {
-      setLoading(true);
-      await Promise.all([fetchSellers(), fetchProducts(), fetchOrders(), fetchRiskFlags()]);
-      setLoading(false);
-    };
-    fetchAll();
-  }, []);
-
-  const fetchRiskFlags = async () => {
-    const { data: flags } = await supabase
-      .from("risk_flags" as any)
+  const fetchDeliveryBatches = async () => {
+    const { data: batchesData } = await supabase
+      .from("delivery_batches")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (flags && (flags as any[]).length > 0) {
-      const sellerIds = [...new Set((flags as any[]).map((f: any) => f.seller_id))];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("user_id, full_name")
-        .in("user_id", sellerIds);
-      const { data: sellerProfs } = await supabase
-        .from("seller_profiles")
-        .select("user_id, business_name")
-        .in("user_id", sellerIds);
+    if (batchesData) {
+      // Get order counts per batch
+      const batchIds = batchesData.map((b) => b.id);
+      const { data: ordersInBatches } = await supabase
+        .from("orders")
+        .select("batch_id")
+        .in("batch_id", batchIds);
 
-      const nameMap = new Map((profiles || []).map((p) => [p.user_id, p.full_name || "Unknown"]));
-      const bizMap = new Map((sellerProfs || []).map((s) => [s.user_id, s.business_name]));
+      const countMap = new Map<string, number>();
+      (ordersInBatches || []).forEach((o) => {
+        if (o.batch_id) countMap.set(o.batch_id, (countMap.get(o.batch_id) || 0) + 1);
+      });
 
-      setRiskFlags(
-        (flags as any[]).map((f: any) => ({
-          ...f,
-          seller_name: nameMap.get(f.seller_id) || "Unknown",
-          business_name: bizMap.get(f.seller_id) || "Unknown",
+      // Get partner names
+      const partnerIds = batchesData.map((b) => b.delivery_partner).filter(Boolean) as string[];
+      let partnerNameMap = new Map<string, string>();
+      if (partnerIds.length > 0) {
+        const { data: partners } = await supabase
+          .from("delivery_partners")
+          .select("user_id, name")
+          .in("user_id", partnerIds);
+        (partners || []).forEach((p) => partnerNameMap.set(p.user_id, p.name));
+      }
+
+      setDeliveryBatches(
+        batchesData.map((b) => ({
+          ...b,
+          delivery_partner_name: b.delivery_partner ? partnerNameMap.get(b.delivery_partner) || null : null,
+          order_count: countMap.get(b.id) || 0,
         }))
       );
-    } else {
-      setRiskFlags([]);
     }
   };
 
-  const handleResolveFlag = async (flagId: string) => {
-    setActionLoadingId(flagId);
+  const fetchDeliveryPartners = async () => {
+    const { data } = await supabase
+      .from("delivery_partners")
+      .select("*")
+      .order("name");
+    setDeliveryPartners(data || []);
+  };
+
+  const assignPartnerToBatch = async (batchId: string, partnerUserId: string) => {
+    setAssigningBatchId(batchId);
     const { error } = await supabase
-      .from("risk_flags" as any)
-      .update({ resolved: true } as any)
-      .eq("id", flagId);
+      .from("delivery_batches")
+      .update({
+        delivery_partner: partnerUserId,
+        status: "assigned",
+      })
+      .eq("id", batchId);
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Flag Resolved", description: "Risk flag has been marked as resolved." });
-      fetchRiskFlags();
+      // Notify the delivery partner
+      await supabase.from("notifications").insert({
+        user_id: partnerUserId,
+        title: "New Batch Assigned! 📦",
+        message: "A new delivery batch has been assigned to you. Check your delivery dashboard.",
+        type: "delivery",
+      });
+
+      toast({ title: "Partner Assigned ✓", description: "Delivery partner has been assigned to the batch." });
+      fetchDeliveryBatches();
     }
-    setActionLoadingId(null);
+    setAssigningBatchId(null);
+    setSelectedPartnerId("");
   };
 
-  const handleRunTrustMonitor = async () => {
-    setRunningMonitor(true);
+  const registerDeliveryPartner = async () => {
+    if (!newPartnerName.trim() || !newPartnerEmail.trim()) {
+      toast({ title: "Name and email required", variant: "destructive" });
+      return;
+    }
+
+    setRegisteringPartner(true);
     try {
-      const { data, error } = await supabase.functions.invoke("trust-monitor", { body: {} });
-      if (error) throw error;
-      toast({
-        title: "Trust Monitor Complete",
-        description: `Created ${data?.new_flags_created || 0} new flags.`,
-      });
-      await Promise.all([fetchRiskFlags(), fetchSellers()]);
+      // Look up user by email via admin RPC function
+      const { data: userId, error: lookupError } = await supabase
+        .rpc("get_user_id_by_email", { lookup_email: newPartnerEmail.trim() });
+
+      if (lookupError || !userId) {
+        toast({ title: "User not found", description: "No user found with this email. They must sign up first.", variant: "destructive" });
+        setRegisteringPartner(false);
+        return;
+      }
+
+      // Assign delivery_partner role
+      const { error: roleError } = await supabase
+        .from("user_roles")
+        .insert({ user_id: userId, role: "delivery_partner" });
+      if (roleError && !roleError.message.includes("duplicate")) throw roleError;
+
+      // Update profiles table role
+      await supabase
+        .from("profiles")
+        .update({ role: "delivery_partner" })
+        .eq("user_id", userId);
+
+      // Create delivery partner profile
+      const { error: dpError } = await supabase
+        .from("delivery_partners")
+        .insert({
+          user_id: userId,
+          name: newPartnerName.trim(),
+          phone: newPartnerPhone.trim(),
+          vehicle_type: newPartnerVehicle || null,
+          assigned_village: newPartnerVillage || null,
+          status: "available",
+        });
+
+      if (dpError && !dpError.message.includes("duplicate")) throw dpError;
+
+      toast({ title: "Delivery partner registered! ✓" });
+      setNewPartnerName("");
+      setNewPartnerPhone("");
+      setNewPartnerVehicle("");
+      setNewPartnerVillage("");
+      setNewPartnerEmail("");
+      fetchDeliveryPartners();
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
-      setRunningMonitor(false);
+      setRegisteringPartner(false);
     }
   };
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      setLoading(true);
+      await Promise.all([fetchSellers(), fetchProducts(), fetchOrders(), fetchDeliveryBatches(), fetchDeliveryPartners()]);
+      setLoading(false);
+    };
+    fetchAll();
+  }, []);
 
   const handleApproveSeller = async (seller: SellerProfile) => {
     setActionLoadingId(seller.id);
@@ -409,11 +500,20 @@ const AdminPanel = () => {
 
   const pendingCount = sellers.filter((s) => s.fssai_status === "pending").length;
 
+  const todayOrders = orders.filter((o) => {
+    const d = new Date(o.created_at);
+    const today = new Date();
+    return d.toDateString() === today.toDateString();
+  });
+  const todayPayments = todayOrders.filter((o) => o.payment_status === "paid").reduce((sum, o) => sum + o.total, 0);
+
   const stats = [
     { label: "Total Sellers", value: String(sellers.length), icon: Users, color: "text-blue-600" },
     { label: "Active Products", value: String(products.filter((p) => p.is_active).length), icon: Package, color: "text-emerald-600" },
     { label: "Total Orders", value: String(orders.length), icon: ShoppingCart, color: "text-violet-600" },
     { label: "Pending Approvals", value: String(pendingCount), icon: AlertTriangle, color: "text-amber-600" },
+    { label: "Active Batches", value: String(deliveryBatches.filter((b) => b.status !== "delivered").length), icon: Truck, color: "text-cyan-600" },
+    { label: "Today's Payments", value: `₹${todayPayments.toLocaleString()}`, icon: CreditCard, color: "text-pink-600" },
   ];
 
   const getStatusBadge = (status: string) => {
@@ -482,7 +582,7 @@ const AdminPanel = () => {
           </motion.div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
             {stats.map((stat, i) => (
               <motion.div
                 key={stat.label}
@@ -523,14 +623,9 @@ const AdminPanel = () => {
                 <ShoppingCart className="w-4 h-4 mr-1.5" />
                 Orders
               </TabsTrigger>
-              <TabsTrigger value="trust" className="font-body text-sm">
-                <AlertTriangle className="w-4 h-4 mr-1.5" />
-                Trust
-                {riskFlags.filter(f => !f.resolved).length > 0 && (
-                  <span className="ml-1.5 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {riskFlags.filter(f => !f.resolved).length}
-                  </span>
-                )}
+              <TabsTrigger value="logistics" className="font-body text-sm">
+                <Truck className="w-4 h-4 mr-1.5" />
+                Logistics
               </TabsTrigger>
             </TabsList>
 
@@ -831,105 +926,252 @@ const AdminPanel = () => {
                 </CardContent>
               </Card>
             </TabsContent>
-
-            {/* ====== TRUST & RISK TAB ====== */}
-            <TabsContent value="trust">
-              <Card className="shadow-card">
-                <CardHeader>
-                  <div className="flex flex-col sm:flex-row justify-between gap-4">
+            {/* ====== LOGISTICS TAB ====== */}
+            <TabsContent value="logistics">
+              <div className="space-y-6">
+                {/* Delivery Batches */}
+                <Card className="shadow-card">
+                  <CardHeader>
                     <CardTitle className="font-display text-lg flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5 text-red-500" />
-                      Trust & Risk Monitoring
-                      <Badge variant="secondary" className="ml-2 text-xs">
-                        {riskFlags.filter(f => !f.resolved).length} active flags
-                      </Badge>
+                      <Truck className="w-5 h-5 text-primary" />
+                      Delivery Batches
+                      <Badge variant="secondary" className="ml-2 text-xs">{deliveryBatches.length} total</Badge>
                     </CardTitle>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleRunTrustMonitor}
-                      disabled={runningMonitor}
-                    >
-                      {runningMonitor ? (
-                        <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                      ) : (
-                        <Shield className="w-4 h-4 mr-1" />
-                      )}
-                      Run Trust Monitor
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {riskFlags.length === 0 ? (
-                    <div className="text-center py-10">
-                      <Shield className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                      <p className="text-muted-foreground font-body text-sm">No risk flags found. Run the trust monitor to scan for issues.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {riskFlags.map((flag) => (
-                        <div
-                          key={flag.id}
-                          className={`p-4 rounded-xl ${flag.resolved ? 'bg-muted/30 opacity-60' : 'bg-muted/50'}`}
-                        >
-                          <div className="flex flex-col sm:flex-row justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                <p className="font-body font-semibold text-sm text-foreground">
-                                  {flag.business_name}
-                                </p>
-                                <Badge
-                                  className={`text-xs ${flag.severity === 'high'
-                                      ? 'bg-red-100 text-red-800 hover:bg-red-100'
-                                      : flag.severity === 'medium'
-                                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
-                                        : 'bg-blue-100 text-blue-800 hover:bg-blue-100'
-                                    }`}
-                                >
-                                  {flag.severity.toUpperCase()}
-                                </Badge>
-                                <Badge variant="outline" className="text-xs capitalize">
-                                  {flag.flag_type.replace(/_/g, ' ')}
-                                </Badge>
-                                {flag.resolved && (
-                                  <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-xs">
-                                    ✓ Resolved
+                  </CardHeader>
+                  <CardContent>
+                    {deliveryBatches.length === 0 ? (
+                      <div className="text-center py-10">
+                        <Truck className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                        <p className="text-muted-foreground font-body text-sm">No delivery batches yet</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {deliveryBatches.map((batch) => (
+                          <div key={batch.id} className="p-4 bg-muted/50 rounded-xl">
+                            <div className="flex flex-col sm:flex-row justify-between gap-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <MapPin className="w-4 h-4 text-primary" />
+                                  <p className="font-body font-semibold text-sm text-foreground">
+                                    {batch.village}
+                                    {batch.district && ` — ${batch.district}`}
+                                  </p>
+                                  <Badge className={`text-xs ${batch.status === "delivered" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100" :
+                                    batch.status === "out_for_delivery" ? "bg-blue-100 text-blue-800 hover:bg-blue-100" :
+                                      batch.status === "picked_up" ? "bg-violet-100 text-violet-800 hover:bg-violet-100" :
+                                        batch.status === "assigned" ? "bg-amber-100 text-amber-800 hover:bg-amber-100" :
+                                          "bg-gray-100 text-gray-800 hover:bg-gray-100"
+                                    }`}>
+                                    {batch.status}
                                   </Badge>
-                                )}
-                              </div>
-                              <p className="text-xs text-muted-foreground font-body">
-                                {flag.seller_name} · {new Date(flag.created_at).toLocaleDateString("en-IN")}
-                              </p>
-                              {flag.details && (
-                                <p className="text-xs text-foreground/70 font-body mt-1">
-                                  {flag.details}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-start gap-2 flex-shrink-0">
-                              {!flag.resolved && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                                  onClick={() => handleResolveFlag(flag.id)}
-                                  disabled={actionLoadingId === flag.id}
-                                >
-                                  {actionLoadingId === flag.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <><CheckCircle className="w-4 h-4 mr-1" /> Resolve</>
+                                </div>
+                                <p className="text-xs text-muted-foreground font-body">
+                                  {batch.order_count} order{batch.order_count !== 1 ? "s" : ""} ·{" "}
+                                  {new Date(batch.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                                  {batch.delivery_partner_name && (
+                                    <> · Partner: <strong>{batch.delivery_partner_name}</strong></>
                                   )}
-                                </Button>
+                                </p>
+                              </div>
+                              {/* Assign Partner */}
+                              {!batch.delivery_partner && batch.status === "created" && (
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <Select
+                                    value={selectedPartnerId}
+                                    onValueChange={setSelectedPartnerId}
+                                  >
+                                    <SelectTrigger className="w-40 h-8 text-xs">
+                                      <SelectValue placeholder="Select partner" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {deliveryPartners
+                                        .filter((p) => p.status === "available")
+                                        .map((p) => (
+                                          <SelectItem key={p.user_id} value={p.user_id} className="text-xs">
+                                            {p.name} {p.vehicle_type && `(${p.vehicle_type})`}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    size="sm"
+                                    className="h-8 text-xs"
+                                    disabled={!selectedPartnerId || assigningBatchId === batch.id}
+                                    onClick={() => assignPartnerToBatch(batch.id, selectedPartnerId)}
+                                  >
+                                    {assigningBatchId === batch.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      "Assign"
+                                    )}
+                                  </Button>
+                                </div>
                               )}
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Delivery Partners */}
+                <Card className="shadow-card">
+                  <CardHeader>
+                    <CardTitle className="font-display text-lg flex items-center gap-2">
+                      <Users className="w-5 h-5 text-primary" />
+                      Delivery Partners
+                      <Badge variant="secondary" className="ml-2 text-xs">{deliveryPartners.length} total</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {deliveryPartners.length === 0 ? (
+                      <div className="text-center py-10">
+                        <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                        <p className="text-muted-foreground font-body text-sm">No delivery partners registered</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {deliveryPartners.map((partner) => (
+                          <div key={partner.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-xl">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-3 h-3 rounded-full flex-shrink-0 ${partner.status === "available" ? "bg-emerald-500" :
+                                partner.status === "busy" ? "bg-amber-500" : "bg-gray-400"
+                                }`} />
+                              <div>
+                                <p className="font-body font-semibold text-sm text-foreground">{partner.name}</p>
+                                <p className="text-xs text-muted-foreground font-body">
+                                  {partner.phone && `${partner.phone} · `}
+                                  {partner.vehicle_type && `${partner.vehicle_type} · `}
+                                  {partner.assigned_village && `Village: ${partner.assigned_village}`}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge variant={partner.status === "available" ? "default" : "secondary"} className="text-xs capitalize">
+                              {partner.status}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Register New Delivery Partner */}
+                <Card className="shadow-card">
+                  <CardHeader>
+                    <CardTitle className="font-display text-lg flex items-center gap-2">
+                      <Truck className="w-5 h-5 text-primary" />
+                      Register Delivery Partner
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-body font-semibold text-foreground mb-1 block">Full Name *</label>
+                        <Input
+                          placeholder="Rajan Kumar"
+                          value={newPartnerName}
+                          onChange={(e) => setNewPartnerName(e.target.value)}
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-body font-semibold text-foreground mb-1 block">User Email (signup email) *</label>
+                        <Input
+                          placeholder="user@example.com"
+                          value={newPartnerEmail}
+                          onChange={(e) => setNewPartnerEmail(e.target.value)}
+                          className="h-9 text-sm"
+                          type="email"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-body font-semibold text-foreground mb-1 block">Phone</label>
+                        <Input
+                          placeholder="9876543210"
+                          value={newPartnerPhone}
+                          onChange={(e) => setNewPartnerPhone(e.target.value)}
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-body font-semibold text-foreground mb-1 block">Vehicle Type</label>
+                        <Select value={newPartnerVehicle} onValueChange={setNewPartnerVehicle}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder="Select vehicle" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="bicycle">Bicycle</SelectItem>
+                            <SelectItem value="motorcycle">Motorcycle</SelectItem>
+                            <SelectItem value="scooter">Scooter</SelectItem>
+                            <SelectItem value="auto">Auto Rickshaw</SelectItem>
+                            <SelectItem value="van">Van</SelectItem>
+                            <SelectItem value="on_foot">On Foot</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-body font-semibold text-foreground mb-1 block">Assigned Village</label>
+                        <Input
+                          placeholder="e.g. Thrissur"
+                          value={newPartnerVillage}
+                          onChange={(e) => setNewPartnerVillage(e.target.value)}
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          className="w-full h-9 text-sm"
+                          onClick={registerDeliveryPartner}
+                          disabled={registeringPartner}
+                        >
+                          {registeringPartner ? (
+                            <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                          ) : (
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                          )}
+                          Register Partner
+                        </Button>
+                      </div>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                {/* Today's Summary */}
+                <Card className="shadow-card">
+                  <CardHeader>
+                    <CardTitle className="font-display text-lg flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-primary" />
+                      Today's Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="text-center p-3 bg-muted/50 rounded-xl">
+                        <p className="text-2xl font-display font-bold text-foreground">{todayOrders.length}</p>
+                        <p className="text-xs text-muted-foreground font-body">Orders Today</p>
+                      </div>
+                      <div className="text-center p-3 bg-muted/50 rounded-xl">
+                        <p className="text-2xl font-display font-bold text-emerald-600">₹{todayPayments.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground font-body">Payments Today</p>
+                      </div>
+                      <div className="text-center p-3 bg-muted/50 rounded-xl">
+                        <p className="text-2xl font-display font-bold text-foreground">
+                          {deliveryBatches.filter((b) => b.status !== "delivered").length}
+                        </p>
+                        <p className="text-xs text-muted-foreground font-body">Pending Deliveries</p>
+                      </div>
+                      <div className="text-center p-3 bg-muted/50 rounded-xl">
+                        <p className="text-2xl font-display font-bold text-foreground">
+                          {deliveryPartners.filter((p) => p.status === "available").length}
+                        </p>
+                        <p className="text-xs text-muted-foreground font-body">Available Partners</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </TabsContent>
           </Tabs>
         </div>
