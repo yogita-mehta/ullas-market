@@ -6,7 +6,7 @@ import { HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 
 const faqs = [
-    { q: "How do I place an order?", a: "Browse the Marketplace, find a product you like, and click 'Buy Now'. You'll be prompted to log in if you haven't already. After ordering, you can mark the payment as completed from your Buyer Dashboard." },
+    { q: "How do I place an order?", a: "Browse the Marketplace, find a product you like, and click 'Add to Cart'. You'll be prompted to log in if you haven't already. After ordering, you can mark the payment as completed from your Buyer Dashboard." },
     { q: "How do I track my order?", a: "Go to your Buyer Dashboard to see all your orders, their current status, and payment information." },
     { q: "How do I become a seller?", a: "Click 'Become Seller' in the navigation, fill in your business details and FSSAI license number, and wait for admin verification. Once approved, you can start adding products." },
     { q: "What is FSSAI verification?", a: "FSSAI (Food Safety and Standards Authority of India) certification is mandatory for all food businesses in India. We require this to ensure all products on our platform are safe and compliant." },

@@ -36,7 +36,7 @@ const translations: Record<string, Record<Language, string>> = {
     "market.subtitle": { en: "Authentic homemade products from FSSAI verified sellers", ml: "FSSAI സാക്ഷ്യപ്പെടുത്തിയ വിൽപ്പനക്കാരിൽ നിന്നുള്ള ആധികാരിക ഉൽപ്പന്നങ്ങൾ" },
     "market.search": { en: "Search products...", ml: "ഉൽപ്പന്നങ്ങൾ തിരയുക..." },
     "market.filters": { en: "Filters", ml: "ഫിൽട്ടറുകൾ" },
-    "market.buyNow": { en: "Buy Now", ml: "ഇപ്പോൾ വാങ്ങുക" },
+    "market.buyNow": { en: "Add to Cart", ml: "കാർട്ടിലേക്ക് ചേർക്കുക" },
     "market.outOfStock": { en: "Out of Stock", ml: "സ്റ്റോക്ക് തീർന്നു" },
     "market.noProducts": { en: "No products found", ml: "ഉൽപ്പന്നങ്ങൾ കണ്ടെത്തിയില്ല" },
     "market.fssaiVerified": { en: "FSSAI Verified", ml: "FSSAI സാക്ഷ്യപ്പെടുത്തി" },

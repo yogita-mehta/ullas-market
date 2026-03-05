@@ -296,7 +296,7 @@ const SellerStorePage = () => {
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <Button
-                                                        variant="default"
+                                                        variant="outline"
                                                         size="sm"
                                                         className="flex-1"
                                                         onClick={() => handleAddToCart(product)}
@@ -309,6 +309,20 @@ const SellerStorePage = () => {
                                                         )}
                                                         {product.stock <= 0 ? "Out of Stock" : "Add to Cart"}
                                                     </Button>
+                                                    {product.stock > 0 && (
+                                                        <Button
+                                                            variant="default"
+                                                            size="sm"
+                                                            className="flex-1"
+                                                            onClick={async () => {
+                                                                await handleAddToCart(product);
+                                                                navigate("/cart");
+                                                            }}
+                                                            disabled={buyingId === product.id}
+                                                        >
+                                                            Buy Now
+                                                        </Button>
+                                                    )}
                                                 </div>
                                             </div>
                                         </motion.div>

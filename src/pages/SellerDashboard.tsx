@@ -178,6 +178,10 @@ const SellerDashboard = () => {
   const updateOrderStatus = async (orderId: string, newStatus: string, label: string) => {
     setUpdatingOrder(orderId);
     const updateData: Record<string, string> = { delivery_status: newStatus };
+    // When rejecting/cancelling, also update the main status field
+    if (newStatus === "cancelled") {
+      updateData.status = "cancelled";
+    }
 
     const { error } = await supabase
       .from("orders")
@@ -195,6 +199,7 @@ const SellerDashboard = () => {
         const messages: Record<string, string> = {
           confirmed: "Your order has been accepted by the seller! 🎉",
           packed: "Your order has been packed and is ready for pickup! 📦",
+          cancelled: "Your order has been rejected by the seller. ❌",
         };
         if (messages[newStatus]) {
           await supabase.from("notifications").insert({
@@ -532,17 +537,28 @@ const SellerDashboard = () => {
                           </span>
                         ))}
                       </div>
-                      {order.payment_status === "paid" && order.delivery_status !== "delivered" && order.delivery_status !== "cancelled" && (
+                      {order.delivery_status !== "delivered" && order.delivery_status !== "cancelled" && (
                         <div className="flex gap-2 flex-wrap">
                           {order.delivery_status === "pending" && (
-                            <Button
-                              size="sm"
-                              onClick={() => updateOrderStatus(order.id, "confirmed", "confirmed")}
-                              disabled={updatingOrder === order.id}
-                            >
-                              {updatingOrder === order.id ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle className="w-4 h-4 mr-1" />}
-                              Accept Order
-                            </Button>
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() => updateOrderStatus(order.id, "confirmed", "confirmed")}
+                                disabled={updatingOrder === order.id}
+                              >
+                                {updatingOrder === order.id ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle className="w-4 h-4 mr-1" />}
+                                Accept Order
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => updateOrderStatus(order.id, "cancelled", "rejected")}
+                                disabled={updatingOrder === order.id}
+                              >
+                                {updatingOrder === order.id ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <XCircle className="w-4 h-4 mr-1" />}
+                                Reject Order
+                              </Button>
+                            </>
                           )}
                           {order.delivery_status === "confirmed" && (
                             <Button

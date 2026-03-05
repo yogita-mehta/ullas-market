@@ -15,10 +15,12 @@ import {
     Loader2,
     CheckCircle,
     X,
+    LocateFixed,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
+import { useGeolocation } from "@/hooks/useGeolocation";
 
 type Address = Tables<"addresses">;
 
@@ -48,6 +50,24 @@ const AddressesPage = () => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<AddressForm>(emptyForm);
     const [saving, setSaving] = useState(false);
+    const { loading: geoLoading, detectAndSaveLocation } = useGeolocation();
+
+    const handleDetectLocation = async () => {
+        if (!user) return;
+        const loc = await detectAndSaveLocation(user.id);
+        if (loc) {
+            setForm((prev) => ({
+                ...prev,
+                village: loc.village || prev.village,
+                district: loc.district || prev.district,
+                state: loc.state || prev.state,
+                pincode: loc.pincode || prev.pincode,
+            }));
+            toast({ title: "Location detected! 📍", description: "Address fields have been auto-filled." });
+        } else {
+            toast({ title: "Could not detect location", description: "Please enter address manually.", variant: "destructive" });
+        }
+    };
 
     const fetchAddresses = async () => {
         if (!user) return;
@@ -226,6 +246,20 @@ const AddressesPage = () => {
                                         value={form.pincode}
                                         onChange={(e) => setForm({ ...form, pincode: e.target.value })}
                                     />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={handleDetectLocation}
+                                        disabled={geoLoading}
+                                        className="w-full border-primary/30 text-primary hover:bg-primary/5"
+                                    >
+                                        {geoLoading ? (
+                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                        ) : (
+                                            <LocateFixed className="w-4 h-4 mr-2" />
+                                        )}
+                                        {geoLoading ? "Detecting..." : "📍 Detect Location"}
+                                    </Button>
                                     <Button onClick={handleSave} disabled={saving} className="w-full">
                                         {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
                                         {editingId ? "Update Address" : "Save Address"}

@@ -18,6 +18,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ShoppingCart,
   Star,
@@ -33,10 +34,13 @@ import {
   Phone,
   Trash2,
   AlertTriangle,
+  XCircle,
+  MessageSquare,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
+
 
 
 interface OrderWithItems {
@@ -52,7 +56,8 @@ interface OrderWithItems {
   address_village: string | null;
   delivery_partner_name: string | null;
   delivery_partner_phone: string | null;
-  items: { product_name: string; quantity: number; price: number; seller_name: string }[];
+  seller_id: string | null;
+  items: { product_id: string; product_name: string; quantity: number; price: number; seller_name: string }[];
 }
 
 const deliverySteps = [
@@ -69,8 +74,15 @@ const BuyerDashboard = () => {
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  // Rating state
+  const [ratingOrderId, setRatingOrderId] = useState<string | null>(null);
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [submittingRating, setSubmittingRating] = useState(false);
+  const [ratedOrderIds, setRatedOrderIds] = useState<Set<string>>(new Set());
 
   const fetchOrders = async () => {
     if (!user) return;
@@ -145,6 +157,8 @@ const BuyerDashboard = () => {
     const enriched: OrderWithItems[] = ordersData.map((order) => {
       const addr = order.address_id ? addressMap.get(order.address_id) : null;
       const partner = order.batch_id ? partnerMap.get(order.batch_id) : null;
+      const orderItems = (items || []).filter((i) => i.order_id === order.id);
+      const firstSellerId = orderItems.length > 0 ? (orderItems[0].products as any)?.seller_id : null;
       return {
         ...order,
         delivery_status: order.delivery_status || order.status || "pending",
@@ -152,24 +166,152 @@ const BuyerDashboard = () => {
         address_village: addr?.village || null,
         delivery_partner_name: partner?.name || null,
         delivery_partner_phone: partner?.phone || null,
-        items: (items || [])
-          .filter((i) => i.order_id === order.id)
-          .map((i) => ({
-            product_name: (i.products as any)?.name || "Unknown",
-            quantity: i.quantity,
-            price: i.price,
-            seller_name: profileMap.get((i.products as any)?.seller_id) || "Seller",
-          })),
+        seller_id: firstSellerId,
+        items: orderItems.map((i) => ({
+          product_id: i.product_id,
+          product_name: (i.products as any)?.name || "Unknown",
+          quantity: i.quantity,
+          price: i.price,
+          seller_name: profileMap.get((i.products as any)?.seller_id) || "Seller",
+        })),
       };
     });
 
     setOrders(enriched);
+
+    // Check which orders have already been rated
+    const deliveredIds = enriched.filter((o: OrderWithItems) => o.delivery_status === "delivered").map((o: OrderWithItems) => o.id);
+    if (deliveredIds.length > 0 && user) {
+      const { data: existingReviews } = await supabase
+        .from("reviews")
+        .select("product_id")
+        .eq("buyer_id", user.id);
+
+      // Get product IDs already reviewed
+      const reviewedProductIds = new Set((existingReviews || []).map((r) => r.product_id));
+
+      // An order is "rated" if ALL its products have reviews
+      const rated = new Set<string>();
+      for (const order of enriched) {
+        if (order.delivery_status === "delivered" && order.items.length > 0) {
+          const allRated = order.items.every((item) => reviewedProductIds.has(item.product_id));
+          if (allRated) rated.add(order.id);
+        }
+      }
+      setRatedOrderIds(rated);
+    }
+
     setLoading(false);
   };
 
   useEffect(() => {
     fetchOrders();
   }, [user]);
+
+  // Real-time subscription: refresh orders when delivery partner or seller updates status
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`buyer-orders-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+          filter: `buyer_id=eq.${user.id}`,
+        },
+        () => {
+          fetchOrders();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  // Cancel order handler
+  const cancelOrder = async (orderId: string) => {
+    setCancellingId(orderId);
+    try {
+      // Update order status
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: "cancelled", delivery_status: "cancelled" })
+        .eq("id", orderId);
+
+      if (error) throw error;
+
+      // Restore product stock
+      const order = orders.find((o) => o.id === orderId);
+      if (order) {
+        for (const item of order.items) {
+          // Get current stock and add back the quantity
+          const { data: prod } = await supabase
+            .from("products")
+            .select("stock")
+            .eq("id", item.product_id)
+            .single();
+          if (prod) {
+            await supabase
+              .from("products")
+              .update({ stock: prod.stock + item.quantity })
+              .eq("id", item.product_id);
+          }
+        }
+
+        // Notify seller
+        if (order.seller_id) {
+          await supabase.from("notifications").insert({
+            user_id: order.seller_id,
+            title: "Order Cancelled",
+            message: `A buyer has cancelled order #${orderId.slice(0, 8)}. Stock has been restored.`,
+            type: "order",
+          });
+        }
+      }
+
+      toast({ title: "Order cancelled", description: "Your order has been cancelled successfully." });
+      fetchOrders();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  // Submit rating
+  const submitRating = async (order: OrderWithItems) => {
+    if (!user || ratingValue === 0) {
+      toast({ title: "Please select a rating", variant: "destructive" });
+      return;
+    }
+    setSubmittingRating(true);
+    try {
+      // Insert a review for each product in the order
+      for (const item of order.items) {
+        const { error } = await supabase.from("reviews").insert({
+          product_id: item.product_id,
+          buyer_id: user.id,
+          rating: ratingValue,
+          comment: ratingComment.trim() || null,
+        });
+        if (error && !error.message.includes("duplicate")) throw error;
+      }
+
+      toast({ title: "Thanks for your rating! ⭐", description: "Your review has been submitted." });
+      setRatedOrderIds((prev) => new Set([...prev, order.id]));
+      setRatingOrderId(null);
+      setRatingValue(0);
+      setRatingComment("");
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setSubmittingRating(false);
+    }
+  };
 
   // Simulated pay now for pending orders (Demo Mode)
   const payNow = async (orderId: string, amount: number) => {
@@ -398,6 +540,101 @@ const BuyerDashboard = () => {
                             )}
                             Pay Now — ₹{order.total}
                           </Button>
+                        )}
+
+                        {/* Cancel Order button */}
+                        {!isCancelled && (order.delivery_status === "pending" || order.delivery_status === "confirmed") && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="destructive" size="sm" className="mt-2">
+                                <XCircle className="w-4 h-4 mr-1" />
+                                Cancel Order
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Cancel this order?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will cancel your order and restore the product stock. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Keep Order</AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="bg-red-600 hover:bg-red-700"
+                                  disabled={cancellingId === order.id}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    cancelOrder(order.id);
+                                  }}
+                                >
+                                  {cancellingId === order.id ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <XCircle className="w-4 h-4 mr-1" />}
+                                  Yes, Cancel
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+
+                        {/* Rating section for delivered orders */}
+                        {order.delivery_status === "delivered" && (
+                          <div className="mt-3 pt-3 border-t border-border">
+                            {ratedOrderIds.has(order.id) ? (
+                              <div className="flex items-center gap-2 text-emerald-600">
+                                <CheckCircle className="w-4 h-4" />
+                                <span className="text-sm font-body font-medium">Rated ✓</span>
+                              </div>
+                            ) : ratingOrderId === order.id ? (
+                              <div className="space-y-3">
+                                <p className="text-sm font-body font-semibold text-foreground">Rate this order</p>
+                                <div className="flex gap-1">
+                                  {[1, 2, 3, 4, 5].map((star) => (
+                                    <button
+                                      key={star}
+                                      onClick={() => setRatingValue(star)}
+                                      className="focus:outline-none transition-transform hover:scale-110"
+                                    >
+                                      <Star
+                                        className={`w-7 h-7 ${star <= ratingValue ? "text-amber-500 fill-amber-500" : "text-muted-foreground/30"}`}
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                                <Textarea
+                                  placeholder="Write a comment (optional)..."
+                                  value={ratingComment}
+                                  onChange={(e) => setRatingComment(e.target.value)}
+                                  className="h-20 text-sm"
+                                />
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => submitRating(order)}
+                                    disabled={submittingRating || ratingValue === 0}
+                                  >
+                                    {submittingRating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Star className="w-4 h-4 mr-1" />}
+                                    Submit Rating
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setRatingOrderId(null); setRatingValue(0); setRatingComment(""); }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setRatingOrderId(order.id)}
+                              >
+                                <MessageSquare className="w-4 h-4 mr-1" />
+                                Rate Order
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
