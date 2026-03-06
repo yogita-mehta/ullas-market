@@ -4,6 +4,8 @@ interface UseVoiceRecorderReturn {
     isRecording: boolean;
     isPreparing: boolean;
     audioBase64: string | null;
+    audioBlob: Blob | null;
+    audioMimeType: string | null;
     duration: number;
     startRecording: () => Promise<void>;
     stopRecording: () => void;
@@ -17,6 +19,8 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
     const [isRecording, setIsRecording] = useState(false);
     const [isPreparing, setIsPreparing] = useState(false);
     const [audioBase64, setAudioBase64] = useState<string | null>(null);
+    const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+    const [audioMimeType, setAudioMimeType] = useState<string | null>(null);
     const [duration, setDuration] = useState(0);
     const [error, setError] = useState<string | null>(null);
 
@@ -61,11 +65,16 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = stream;
 
+            // Prefer webm/opus, fall back to webm, then let the browser decide
             const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
                 ? "audio/webm;codecs=opus"
-                : "audio/webm";
+                : MediaRecorder.isTypeSupported("audio/webm")
+                    ? "audio/webm"
+                    : "";
 
-            const mediaRecorder = new MediaRecorder(stream, { mimeType });
+            const recorderOptions: MediaRecorderOptions = mimeType ? { mimeType } : {};
+            const mediaRecorder = new MediaRecorder(stream, recorderOptions);
+            const actualMime = mediaRecorder.mimeType || mimeType || "audio/webm";
             mediaRecorderRef.current = mediaRecorder;
             chunksRef.current = [];
 
@@ -76,13 +85,36 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
             };
 
             mediaRecorder.onstop = () => {
-                const blob = new Blob(chunksRef.current, { type: mimeType });
+                const blob = new Blob(chunksRef.current, { type: actualMime });
+                setAudioBlob(blob);
+                setAudioMimeType(actualMime);
 
+                // #region agent log
+                fetch('http://127.0.0.1:7728/ingest/c93e0e8b-3052-4f59-93ee-27b7541b6521', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Debug-Session-Id': 'f5aedc',
+                    },
+                    body: JSON.stringify({
+                        sessionId: 'f5aedc',
+                        runId: 'pre-fix',
+                        hypothesisId: 'H0',
+                        location: 'useVoiceRecorder.ts:onstop',
+                        message: 'MediaRecorder stopped and blob created',
+                        data: {
+                            size: blob.size,
+                            type: blob.type,
+                        },
+                        timestamp: Date.now(),
+                    }),
+                }).catch(() => { });
+                // #endregion
+
+                // Also set base64 for backward compat
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                    const base64 = reader.result as string;
-                    // Strip data URI prefix — the edge function handles both formats
-                    setAudioBase64(base64);
+                    setAudioBase64(reader.result as string);
                 };
                 reader.readAsDataURL(blob);
 
@@ -153,6 +185,8 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
         setIsRecording(false);
         setIsPreparing(false);
         setAudioBase64(null);
+        setAudioBlob(null);
+        setAudioMimeType(null);
         setDuration(0);
         setError(null);
     }, [cleanup]);
@@ -161,6 +195,8 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
         isRecording,
         isPreparing,
         audioBase64,
+        audioBlob,
+        audioMimeType,
         duration,
         startRecording,
         stopRecording,

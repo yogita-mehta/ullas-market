@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdgeFunction } from "@/lib/invokeEdgeFunction";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,8 @@ interface PriceSuggestion {
   min_price: number;
   max_price: number;
   avg_price: number;
+  suggested_price: number;
+  reasoning: string;
   sample_count: number;
 }
 
@@ -42,7 +45,8 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
   const [aiConfidence, setAiConfidence] = useState<number | null>(null);
   const [priceSuggestion, setPriceSuggestion] = useState<PriceSuggestion | null>(null);
   const [fetchingPrice, setFetchingPrice] = useState(false);
-  const priceDebounceRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [voiceMissingFields, setVoiceMissingFields] = useState<string[]>([]);
+  const priceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,6 +68,7 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
     setDialectDetected(null);
     setAiConfidence(null);
     setPriceSuggestion(null);
+    setVoiceMissingFields([]);
   };
 
   const fetchPriceSuggestion = useCallback(async (productName: string, productCategory?: string) => {
@@ -73,8 +78,9 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
     }
     setFetchingPrice(true);
     try {
-      const { data, error } = await supabase.functions.invoke("suggest-price", {
-        body: { product_name: productName, category: productCategory || undefined },
+      const { data, error } = await invokeEdgeFunction<any>("suggest-price", {
+        product_name: productName,
+        category: productCategory || undefined,
       });
       if (!error && data && data.sample_count >= 2) {
         setPriceSuggestion(data as PriceSuggestion);
@@ -91,11 +97,11 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
   const handleNameChange = (newName: string) => {
     setName(newName);
     // Debounce price suggestion
-    if (priceDebounceRef[0]) clearTimeout(priceDebounceRef[0]);
+    if (priceDebounceRef.current) clearTimeout(priceDebounceRef.current);
     const timer = setTimeout(() => {
       fetchPriceSuggestion(newName, category);
     }, 800);
-    priceDebounceRef[1](timer);
+    priceDebounceRef.current = timer;
   };
 
   const handleVoiceResult = (result: VoiceExtractResult) => {
@@ -111,6 +117,13 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
     }
     if (result.dialect_detected) setDialectDetected(result.dialect_detected);
     if (result.ai_confidence !== undefined) setAiConfidence(result.ai_confidence);
+
+    // Track missing fields for UI highlighting
+    if (result.missing_fields && result.missing_fields.length > 0) {
+      setVoiceMissingFields(result.missing_fields);
+    } else {
+      setVoiceMissingFields([]);
+    }
 
     // Trigger price suggestion for the extracted name
     if (result.official_name) {
@@ -232,7 +245,15 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="price">Price (₹) *</Label>
-              <Input id="price" type="number" min="1" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="180" />
+              <Input
+                id="price"
+                type="number"
+                min="1"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="180"
+                className={voiceMissingFields.includes("price") ? "border-amber-400 ring-1 ring-amber-300" : ""}
+              />
               {/* AI Price Suggestion */}
               {fetchingPrice && (
                 <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
@@ -243,17 +264,39 @@ const AddProductDialog = ({ onProductAdded, disabled = false }: AddProductDialog
                 <div className="mt-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20">
                   <p className="text-xs font-body text-primary font-medium flex items-center gap-1">
                     <Sparkles className="w-3 h-3" />
-                    AI Suggested: ₹{priceSuggestion.min_price} – ₹{priceSuggestion.max_price}
+                    Suggested: ₹{priceSuggestion.suggested_price || priceSuggestion.avg_price}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Avg ₹{priceSuggestion.avg_price} · {priceSuggestion.sample_count} similar products
+                    Range ₹{priceSuggestion.min_price} – ₹{priceSuggestion.max_price} · {priceSuggestion.sample_count} similar
                   </p>
+                  {priceSuggestion.reasoning && (
+                    <p className="text-[10px] text-muted-foreground mt-1 italic">
+                      {priceSuggestion.reasoning}
+                    </p>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs text-primary hover:text-primary mt-1 px-2"
+                    onClick={() => setPrice(String(priceSuggestion.suggested_price || priceSuggestion.avg_price))}
+                  >
+                    Use this price
+                  </Button>
                 </div>
               )}
             </div>
             <div>
               <Label htmlFor="stock">Quantity *</Label>
-              <Input id="stock" type="number" min="1" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="50" />
+              <Input
+                id="stock"
+                type="number"
+                min="1"
+                value={stock}
+                onChange={(e) => setStock(e.target.value)}
+                placeholder="50"
+                className={voiceMissingFields.includes("quantity") ? "border-amber-400 ring-1 ring-amber-300" : ""}
+              />
             </div>
           </div>
           <div>

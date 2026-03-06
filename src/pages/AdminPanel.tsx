@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdgeFunction } from "@/lib/invokeEdgeFunction";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -116,6 +117,7 @@ interface RiskFlagItem {
   created_at: string;
   seller_name?: string;
   business_name?: string;
+  ai_explanation?: string;
 }
 
 const AdminPanel = () => {
@@ -443,7 +445,7 @@ const AdminPanel = () => {
   const handleRunTrustMonitor = async () => {
     setRunningMonitor(true);
     try {
-      const { data, error } = await supabase.functions.invoke("trust-monitor", { body: {} });
+      const { data, error } = await invokeEdgeFunction<any>("trust-monitor", {});
       if (error) throw error;
       toast({
         title: "Trust Monitor Complete",
@@ -1331,23 +1333,50 @@ const AdminPanel = () => {
                                 </p>
                               )}
                             </div>
-                            <div className="flex items-start gap-2 flex-shrink-0">
-                              {!flag.resolved && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                                  onClick={() => handleResolveFlag(flag.id)}
-                                  disabled={actionLoadingId === flag.id}
-                                >
-                                  {actionLoadingId === flag.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <><CheckCircle className="w-4 h-4 mr-1" /> Resolve</>
-                                  )}
-                                </Button>
-                              )}
-                            </div>
+                            {/* AI Explanation */}
+                            {(flag as any).ai_explanation && (
+                              <div className="mt-2 p-2 rounded-lg bg-violet-50 border border-violet-200">
+                                <p className="text-xs text-violet-700 font-body italic">
+                                  🤖 {(flag as any).ai_explanation}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-start gap-2 flex-shrink-0">
+                            {/* Trust Score Badge */}
+                            {sellers.find(s => s.user_id === flag.seller_id)?.trust_score !== undefined && (
+                              <Badge
+                                className={`text-xs ${(sellers.find(s => s.user_id === flag.seller_id)?.trust_score ?? 100) < 50
+                                  ? 'bg-red-500 text-white hover:bg-red-500'
+                                  : (sellers.find(s => s.user_id === flag.seller_id)?.trust_score ?? 100) < 75
+                                    ? 'bg-amber-500 text-white hover:bg-amber-500'
+                                    : 'bg-emerald-500 text-white hover:bg-emerald-500'
+                                  }`}
+                              >
+                                Trust: {sellers.find(s => s.user_id === flag.seller_id)?.trust_score ?? 100}
+                              </Badge>
+                            )}
+                            {/* Auto-Flag Label */}
+                            {!flag.resolved && flag.severity === 'high' && (
+                              <Badge className="bg-red-600 text-white hover:bg-red-600 text-xs">
+                                ⚠ Auto-Flagged
+                              </Badge>
+                            )}
+                            {!flag.resolved && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                onClick={() => handleResolveFlag(flag.id)}
+                                disabled={actionLoadingId === flag.id}
+                              >
+                                {actionLoadingId === flag.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <><CheckCircle className="w-4 h-4 mr-1" /> Resolve</>
+                                )}
+                              </Button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1379,7 +1408,7 @@ const AdminPanel = () => {
       </Dialog>
 
       <Footer />
-    </div>
+    </div >
   );
 };
 

@@ -23,6 +23,8 @@ import { useNavigate, Link } from "react-router-dom";
 import type { Tables } from "@/integrations/supabase/types";
 import { useCart } from "@/contexts/CartContext";
 import { haversineDistance } from "@/lib/geo";
+import { useActivityTracker } from "@/hooks/useActivityTracker";
+import { invokeEdgeFunction } from "@/lib/invokeEdgeFunction";
 import productShowcase from "@/assets/product-showcase.webp";
 
 type Product = Tables<"products">;
@@ -54,6 +56,7 @@ const Marketplace = () => {
   const [products, setProducts] = useState<ProductWithMeta[]>([]);
   const [nearbySellers, setNearbySellers] = useState<SellerWithDistance[]>([]);
   const { addToCart } = useCart();
+  const { trackView, trackAddToCart } = useActivityTracker();
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -92,16 +95,44 @@ const Marketplace = () => {
       );
       const verifiedIds = [...verifiedMap.keys()];
 
-      // 3. Fetch active products from verified sellers
-      const { data: rawProducts } = await supabase
-        .from("products")
-        .select("*")
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
+      // 3. Try smart-feed for logged-in users
+      let verifiedProducts: any[] = [];
+      let usedSmartFeed = false;
 
-      const verifiedProducts = (rawProducts || []).filter((p) =>
-        verifiedIds.includes(p.seller_id)
-      );
+      if (user) {
+        try {
+          const { data: feedResult, error: feedError } = await invokeEdgeFunction<any>(
+            "smart-feed",
+            {
+              user_id: user.id,
+              category: undefined,
+              limit: 200,
+              latitude: buyerLat,
+              longitude: buyerLon,
+            }
+          );
+
+          if (!feedError && feedResult?.products && feedResult.products.length > 0) {
+            verifiedProducts = feedResult.products;
+            usedSmartFeed = true;
+          }
+        } catch {
+          // Smart feed failed, fall back to direct query
+        }
+      }
+
+      // Fallback: direct query
+      if (!usedSmartFeed) {
+        const { data: rawProducts } = await supabase
+          .from("products")
+          .select("*")
+          .eq("is_active", true)
+          .order("created_at", { ascending: false });
+
+        verifiedProducts = (rawProducts || []).filter((p) =>
+          verifiedIds.includes(p.seller_id)
+        );
+      }
 
       // 4. Fetch seller profiles (name + location)
       const sellerIds = [...new Set(verifiedProducts.map((p) => p.seller_id))];
@@ -171,13 +202,15 @@ const Marketplace = () => {
         ? enrichedProducts.filter((p) => p.seller_id !== user.id)
         : enrichedProducts;
 
-      // Sort by distance if available
-      visibleProducts.sort((a, b) => {
-        if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
-        if (a.distance !== null) return -1;
-        if (b.distance !== null) return 1;
-        return 0;
-      });
+      // Sort by distance if available (only for fallback, smart-feed is pre-sorted)
+      if (!usedSmartFeed) {
+        visibleProducts.sort((a, b) => {
+          if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
+          if (a.distance !== null) return -1;
+          if (b.distance !== null) return 1;
+          return 0;
+        });
+      }
 
       setProducts(visibleProducts);
 
@@ -267,6 +300,7 @@ const Marketplace = () => {
     setBuyingId(product.id);
     try {
       await addToCart(product.id);
+      trackAddToCart(product.id, product.category);
       toast({
         title: "Added to cart! 🛒",
         description: `${product.name} has been added to your cart.`,
@@ -431,6 +465,7 @@ const Marketplace = () => {
                     transition={{ delay: i * 0.05 }}
                     whileHover={{ y: -4 }}
                     className="bg-card rounded-2xl overflow-hidden shadow-card hover:shadow-elevated transition-all duration-300 group"
+                    onViewportEnter={() => trackView(product.id, product.category)}
                   >
                     <div className="relative h-48 overflow-hidden">
                       <img
